@@ -39,8 +39,12 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p_escalate.set_defaults(func=_cmd_escalate)
 
-    p_upload = sub.add_parser("upload", help="Upload a reviewed recipe (by slug) to Mealie.")
-    p_upload.add_argument("slug", help="Slug of the reviewed recipe under output/.")
+    p_upload = sub.add_parser(
+        "upload", help="Batch-upload reviewed recipes (ok + needs_review) to Mealie."
+    )
+    p_upload.add_argument(
+        "--ok-only", action="store_true", help="Upload only `ok` recipes (skip needs_review)."
+    )
     p_upload.set_defaults(func=_cmd_upload)
 
     p_bakeoff = sub.add_parser(
@@ -71,9 +75,11 @@ def _cmd_escalate(args: argparse.Namespace) -> int:
 
 
 def _cmd_upload(args: argparse.Namespace) -> int:
-    raise NotImplementedError(
-        f"upload not implemented yet (slug={args.slug!r}). See mealie.MealieClient.upload."
-    )
+    from recipe_pipeline import extract, mealie
+
+    extract._setup_logging(load_settings().outbox)  # console + run.log
+    mealie.upload_reviewed(load_settings(), include_needs_review=not args.ok_only)
+    return 0
 
 
 def _cmd_bakeoff(args: argparse.Namespace) -> int:
@@ -93,6 +99,10 @@ def main(argv: list[str] | None = None) -> int:
         # Stubs raise NotImplementedError; surface it cleanly instead of a traceback.
         print(f"[not yet implemented] {exc}", file=sys.stderr)
         return 2
+    except RuntimeError as exc:
+        # Expected operational errors (e.g. missing token) — clean message, no traceback.
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

@@ -40,6 +40,13 @@ class Settings(BaseSettings):
     # --- Mealie upload target (port-forward svc/mealie; plain ClusterIP, no Authentik) ---
     mealie_url: str = "http://localhost:9000"
     mealie_api_token: str | None = None
+    # Fixed tags added to EVERY uploaded recipe, so this batch is filterable in Mealie:
+    # source person, that it's a scan, and the pipeline version. Comma-separated.
+    group_tags: str = "a family member,Scan,recipe-pipeline-v1"
+
+    @property
+    def group_tag_list(self) -> list[str]:
+        return [t.strip() for t in self.group_tags.split(",") if t.strip()]
 
     # --- OCR backend (single engine). Apple Vision: accurate, on-device, orientation-tolerant.
     # (TrOCR was removed — universally worse on this corpus and it broke the divergence gate.)
