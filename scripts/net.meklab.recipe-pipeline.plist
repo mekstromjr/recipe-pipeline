@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- launchd agent: nightly recipe-pipeline batch at 01:00.
+     Install:  cp scripts/net.meklab.recipe-pipeline.plist ~/Library/LaunchAgents/
+               launchctl load -w ~/Library/LaunchAgents/net.meklab.recipe-pipeline.plist
+     Wake the Mac so it runs even if asleep:  sudo pmset repeat wake MTWRFSU 00:55:00 -->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>net.meklab.recipe-pipeline</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/mekstromjr/Dev/meklab/recipe-pipeline/scripts/nightly-batch.sh</string>
+    </array>
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key><integer>1</integer>
+        <key>Minute</key><integer>0</integer>
+    </dict>
+    <key>RunAtLoad</key>
+    <false/>
+    <key>StandardOutPath</key>
+    <string>/Users/mekstromjr/Dev/meklab/recipe-pipeline/output/nightly.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/mekstromjr/Dev/meklab/recipe-pipeline/output/nightly.log</string>
+</dict>
+</plist>

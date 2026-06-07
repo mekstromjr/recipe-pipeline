@@ -64,6 +64,24 @@ uv run recipe-pipeline escalate           # re-OCR the FAILED tail with cloud vi
 # then bulk-import the OK recipes to Mealie (manual)
 ```
 
+### Nightly batches (avoid one 12-hour run)
+
+A whole-corpus run is long, so process it ~50/night via a `launchd` agent (macOS). The pipeline
+is resumable (already-done recipes are skipped), so each run just advances the next batch.
+
+```bash
+# Point input at your scans folder (process in place), then install the agent:
+#   RECIPE_INPUT_DIR=/path/to/scansDocuments   (in .env)
+cp scripts/net.meklab.recipe-pipeline.plist ~/Library/LaunchAgents/
+launchctl load -w ~/Library/LaunchAgents/net.meklab.recipe-pipeline.plist   # runs 01:00 nightly
+# So it runs even if the Mac is asleep (needs sudo + plugged in):
+sudo pmset repeat wake MTWRFSU 00:55:00
+```
+
+`scripts/nightly-batch.sh` runs `extract --limit 50` then `escalate --limit 50` under
+`caffeinate` (no idle-sleep mid-batch); progress logs to `output/nightly.log`. Requires Ollama
+running. Disable with `launchctl unload …` and `sudo pmset repeat cancel`.
+
 **Cloud escalation (hard cursive).** Apple Vision can't reliably read difficult handwriting (and
 a local VLM *fabricates* on it — dangerous). So failed cards escalate to a strong cloud vision
 model (`escalate`), which reads cursive far better. This is the only stage that sends a scan
