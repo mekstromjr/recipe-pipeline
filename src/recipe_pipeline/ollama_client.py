@@ -47,7 +47,9 @@ def chat(
         "model": model,
         "messages": messages,
         "stream": False,
-        "options": {"temperature": 0},
+        # num_ctx must be set explicitly: Ollama's small default silently truncates long prompts,
+        # which would drop the system rules or the start of the OCR transcripts.
+        "options": {"temperature": 0, "num_ctx": settings.ollama_num_ctx},
     }
     resp = httpx.post(f"{settings.ollama_host}/api/chat", json=payload, timeout=timeout)
     resp.raise_for_status()
