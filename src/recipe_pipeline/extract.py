@@ -39,7 +39,12 @@ def extract_recipe(settings: Settings, job: RecipeJob) -> Recipe:
         text_b = ocr_b.transcribe_page(page_img).text
         reconciled_pages.append(
             reconcile.reconcile(
-                settings, transcript_a=text_a, transcript_b=text_b, page_image=page_path
+                settings,
+                transcript_a=text_a,
+                transcript_b=text_b,
+                page_image=page_path,
+                label_a=settings.ocr_a,
+                label_b=settings.ocr_b,
             )
         )
 

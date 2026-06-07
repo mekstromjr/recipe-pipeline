@@ -21,11 +21,13 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # --- Local reconcile model (Ollama on this Mac) ---
+    # --- Local models (Ollama on this Mac) ---
     ollama_host: str = "http://localhost:11434"
-    # Vision-capable model that reconciles the two OCR transcripts against the page image.
-    # NOTE: confirm this tag accepts image input via Ollama; fallback is a Qwen2.5-VL tag.
-    reconcile_model: str = "gemma4:26b-mlx-32k"
+    # Reconcile needs a VISION-capable model (must see the page image). gemma4:e4b advertises
+    # the `vision` capability; the gemma4 MLX tags are text-only. Verify with `ollama show`.
+    reconcile_model: str = "gemma4:e4b"
+    # Enrichment is text-only (dish history/estimates), so it can use a larger text model.
+    enrich_model: str = "gemma4:26b-mlx-32k"
 
     # --- Metadata enrichment via SearXNG (port-forward svc/searxng; JSON API) ---
     searxng_url: str = "http://localhost:8888"
