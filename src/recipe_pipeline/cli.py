@@ -20,6 +20,14 @@ def _build_parser() -> argparse.ArgumentParser:
     p_extract = sub.add_parser(
         "extract", help="Process inbox/*.pdf into reviewed recipe JSON under output/<slug>/."
     )
+    p_extract.add_argument(
+        "--limit", type=int, default=None, help="Process at most N recipes (for a sample batch)."
+    )
+    p_extract.add_argument(
+        "--force",
+        action="store_true",
+        help="Reprocess recipes even if output/<slug>/recipe.json already exists.",
+    )
     p_extract.set_defaults(func=_cmd_extract)
 
     p_upload = sub.add_parser("upload", help="Upload a reviewed recipe (by slug) to Mealie.")
@@ -42,7 +50,7 @@ def _build_parser() -> argparse.ArgumentParser:
 def _cmd_extract(args: argparse.Namespace) -> int:
     from recipe_pipeline import extract
 
-    extract.extract_all(load_settings())
+    extract.extract_all(load_settings(), limit=args.limit, force=args.force)
     return 0
 
 

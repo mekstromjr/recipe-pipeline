@@ -123,15 +123,34 @@ def _write_outputs(
     (out_dir / source_pdf.name).write_bytes(source_pdf.read_bytes())
 
 
-def extract_all(settings: Settings) -> None:
-    """Process every PDF in the inbox; log progress and write output/<slug>/ + a manifest."""
+def extract_all(settings: Settings, *, limit: int | None = None, force: bool = False) -> None:
+    """Process inbox/*.pdf; log progress and write output/<slug>/ + a manifest.
+
+    Resumable: recipes already extracted (output/<slug>/recipe.json exists) are skipped unless
+    ``force``. ``limit`` caps how many *new* recipes are processed (for a sample batch).
+    """
     _setup_logging(settings.outbox)
     jobs = ingest.discover(settings.inbox)
     if not jobs:
         logger.info("No PDFs found in %s. Drop a scanned PDF per recipe and retry.", settings.inbox)
         return
 
-    logger.info("Starting run: %d recipe(s)", len(jobs))
+    total = len(jobs)
+    if not force:
+        def _done(j) -> bool:
+            return (settings.outbox / j.slug / "recipe.json").exists()
+
+        n_done = sum(1 for j in jobs if _done(j))
+        jobs = [j for j in jobs if not _done(j)]
+        if n_done:
+            logger.info("Skipping %d already-extracted recipe(s) (use --force to redo)", n_done)
+    if limit is not None:
+        jobs = jobs[:limit]
+
+    if not jobs:
+        logger.info("Nothing to do (%d total, all already extracted).", total)
+        return
+    logger.info("Starting run: %d of %d recipe(s)", len(jobs), total)
     run_start = time.perf_counter()
     manifest: list[dict] = []
     for i, job in enumerate(jobs, 1):
