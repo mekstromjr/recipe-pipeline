@@ -65,12 +65,11 @@ def extract_recipe(settings: Settings, job: RecipeJob) -> tuple[Recipe, ReviewRe
 
     flags: list[ReviewFlag] = []
     ocr_pages: list[str] = []
+    faint_content_pages = 0
     for n, page_path in enumerate(page_images, 1):
         logger.info("    page %d/%d", n, len(page_images))
         page_img = Image.open(page_path)
-        faint = review.assess_image(page_img)
-        if faint:
-            flags.append(faint)
+        faint = review.is_faint(page_img)
         # OCR the RAW page — Apple Vision reads any orientation and a pre-rotated image OCRs worse.
         with _stage("ocr"):
             result = ocr.transcribe_page(page_img)
@@ -80,9 +79,23 @@ def extract_recipe(settings: Settings, job: RecipeJob) -> tuple[Recipe, ReviewRe
         lines = list(reversed(result.lines)) if deg == 180 else result.lines
         text = "\n".join(ln.text for ln in lines) if lines else result.text
         ocr_pages.append(text)
-        flags.extend(review.assess_ocr(text))
+        # A faint page only matters if it produced text (risk of misread). A faint BLANK page
+        # (e.g. the back of a 2-page card) is harmless and must not fail the recipe.
+        if faint and len(text.strip()) >= review.EMPTY_OCR_CHARS:
+            faint_content_pages += 1
         # Persist an upright page for the review pass + Mealie display image (NOT for OCR).
         preprocess.make_upright(page_img, deg).convert("RGB").save(page_path, "JPEG", quality=92)
+
+    # Empty only if the WHOLE scan is unreadable — a single blank page among good ones is fine.
+    flags.extend(review.assess_ocr("\n".join(ocr_pages)))
+    if faint_content_pages:
+        flags.append(
+            ReviewFlag(
+                code="faint_scan",
+                severity="warn",
+                detail=f"{faint_content_pages} faint page(s) with text — verify reading",
+            )
+        )
 
     with _stage("structure"):
         recipe = structure.structure(

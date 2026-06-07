@@ -37,18 +37,12 @@ LLM_FAIL_CONFIDENCE = 0.4
 LLM_WARN_CONFIDENCE = 0.7
 
 
-def assess_image(image: Image.Image) -> ReviewFlag | None:
-    """Flag a page that is too faint / near-blank to trust."""
+def is_faint(image: Image.Image) -> bool:
+    """True if a page is faint / near-blank (low ink fraction or low contrast)."""
     gray = np.asarray(image.convert("L"), dtype=np.uint8)
     frac = float((gray < 128).mean())
     std = float(gray.std())
-    if frac < FAINT_DARK_FRACTION or std < FAINT_STD:
-        return ReviewFlag(
-            code="faint_scan",
-            severity="fail",
-            detail=f"low ink/contrast (dark_fraction={frac:.4f}, std={std:.1f})",
-        )
-    return None
+    return frac < FAINT_DARK_FRACTION or std < FAINT_STD
 
 
 def assess_ocr(text: str) -> list[ReviewFlag]:
