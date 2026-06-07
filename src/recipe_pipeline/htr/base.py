@@ -49,6 +49,7 @@ class HTRBackend(Protocol):
 # Backend identifier -> dotted import path of a factory `build() -> HTRBackend`.
 _REGISTRY: dict[str, str] = {
     "applevision": "recipe_pipeline.htr.applevision:build",
+    "openrouter": "recipe_pipeline.htr.openrouter:build",  # cloud escalation for hard cursive
 }
 
 

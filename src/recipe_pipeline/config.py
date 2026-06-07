@@ -45,6 +45,11 @@ class Settings(BaseSettings):
     # (TrOCR was removed — universally worse on this corpus and it broke the divergence gate.)
     ocr_a: str = "applevision"
 
+    # --- Cloud escalation (the `escalate` command): re-OCR FAILED cards with a strong cloud
+    # vision model that reads hard cursive far better. The only stage that leaves the machine.
+    openrouter_api_key: str | None = None  # copy OPEN_ROUTER_KEY from .env
+    openrouter_ocr_model: str = "google/gemini-2.5-flash"
+
     # --- Directories (resolved relative to the project root if not absolute) ---
     input_dir: Path = Field(default=Path("inbox"))
     output_dir: Path = Field(default=Path("output"))

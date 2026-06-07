@@ -59,9 +59,17 @@ Drop scanned PDFs (one per recipe) into `inbox/`, then:
 uv run recipe-pipeline extract            # all of inbox/ -> reviewed output/<slug>/
 uv run recipe-pipeline extract --limit 20 # sample batch (process 20 new recipes)
 uv run recipe-pipeline extract --force    # reprocess everything (default: skip already-done)
+uv run recipe-pipeline escalate           # re-OCR the FAILED tail with cloud vision (hard cursive)
 # ...review output/<slug>/recipe.md + output/_manifest.json...
 # then bulk-import the OK recipes to Mealie (manual)
 ```
+
+**Cloud escalation (hard cursive).** Apple Vision can't reliably read difficult handwriting (and
+a local VLM *fabricates* on it — dangerous). So failed cards escalate to a strong cloud vision
+model (`escalate`), which reads cursive far better. This is the only stage that sends a scan
+off-device, and only for the failed tail; results still pass the review gate. Set
+`RECIPE_OPENROUTER_API_KEY` (copy from `.env`). On a sample, escalating the failed tail
+roughly doubled the usable rate.
 
 ## Mealie API mapping (verified against the live v3.19.1 instance)
 
@@ -97,7 +105,7 @@ API token gives clean API access. SearXNG's JSON API needs the same port-forward
 | `src/recipe_pipeline/pdf.py` | render PDF pages → images (pypdfium2) |
 | `src/recipe_pipeline/ingest.py` | discover `inbox/*.pdf` → jobs |
 | `src/recipe_pipeline/preprocess.py` | orientation detection + upright image (for review/display) |
-| `src/recipe_pipeline/htr/` | OCR backend interface + `applevision` (Apple Vision, on-device) |
+| `src/recipe_pipeline/htr/` | OCR backends: `applevision` (local) + `openrouter` (cloud escalation) |
 | `src/recipe_pipeline/structure.py` | OCR text → recipe fields + relevance filter |
 | `src/recipe_pipeline/enrich.py` | SearXNG-backed additive metadata enrichment |
 | `src/recipe_pipeline/review.py` | quality gate (faint/empty/[UNCLEAR]/structure/LLM review) |

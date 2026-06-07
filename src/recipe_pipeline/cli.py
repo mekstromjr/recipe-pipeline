@@ -30,6 +30,15 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p_extract.set_defaults(func=_cmd_extract)
 
+    p_escalate = sub.add_parser(
+        "escalate",
+        help="Re-OCR FAILED recipes with the cloud vision model (better at hard cursive).",
+    )
+    p_escalate.add_argument(
+        "--limit", type=int, default=None, help="Escalate at most N failed recipes."
+    )
+    p_escalate.set_defaults(func=_cmd_escalate)
+
     p_upload = sub.add_parser("upload", help="Upload a reviewed recipe (by slug) to Mealie.")
     p_upload.add_argument("slug", help="Slug of the reviewed recipe under output/.")
     p_upload.set_defaults(func=_cmd_upload)
@@ -51,6 +60,13 @@ def _cmd_extract(args: argparse.Namespace) -> int:
     from recipe_pipeline import extract
 
     extract.extract_all(load_settings(), limit=args.limit, force=args.force)
+    return 0
+
+
+def _cmd_escalate(args: argparse.Namespace) -> int:
+    from recipe_pipeline import extract
+
+    extract.escalate(load_settings(), limit=args.limit)
     return 0
 
 

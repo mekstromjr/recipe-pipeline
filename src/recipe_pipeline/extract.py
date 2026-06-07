@@ -55,13 +55,21 @@ def _setup_logging(out_root: Path) -> None:
     logger.addHandler(sh)
 
 
-def extract_recipe(settings: Settings, job: RecipeJob) -> tuple[Recipe, ReviewReport]:
-    """Run the full pipeline for one recipe PDF; return the recipe and its review report."""
+def extract_recipe(
+    settings: Settings, job: RecipeJob, *, ocr_backend: str | None = None
+) -> tuple[Recipe, ReviewReport]:
+    """Run the full pipeline for one recipe PDF; return the recipe and its review report.
+
+    ``ocr_backend`` overrides the OCR engine (used by ``escalate`` to re-OCR with the cloud model).
+    """
+    backend_name = ocr_backend or settings.ocr_a
     out_dir = settings.outbox / job.slug
     with _stage("render"):
         page_images = pdf.render_pages_to_dir(job.pdf_path, out_dir / "pages")
 
-    ocr = get_backend(settings.ocr_a)
+    ocr = get_backend(backend_name)
+    # Apple Vision returns a 180 page bottom-to-top (reverse it); cloud models auto-orient.
+    reverse_180 = backend_name == "applevision"
 
     flags: list[ReviewFlag] = []
     ocr_pages: list[str] = []
@@ -75,8 +83,7 @@ def extract_recipe(settings: Settings, job: RecipeJob) -> tuple[Recipe, ReviewRe
             result = ocr.transcribe_page(page_img)
         with _stage("orient"):
             deg = preprocess.detect_rotation(settings, page_img)
-        # A 180 page is read bottom-to-top; reverse line order so structure gets it forwards.
-        lines = list(reversed(result.lines)) if deg == 180 else result.lines
+        lines = list(reversed(result.lines)) if (reverse_180 and deg == 180) else result.lines
         text = "\n".join(ln.text for ln in lines) if lines else result.text
         ocr_pages.append(text)
         # A faint page only matters if it produced text (risk of misread). A faint BLANK page
@@ -193,6 +200,55 @@ def extract_all(settings: Settings, *, limit: int | None = None, force: bool = F
 
     (settings.outbox / "_manifest.json").write_text(json.dumps(manifest, indent=2))
     _log_summary(manifest, time.perf_counter() - run_start)
+
+
+def escalate(settings: Settings, *, limit: int | None = None) -> None:
+    """Re-OCR the FAILED recipes in the manifest with the cloud vision model and update outputs.
+
+    The only stage that sends scans off-device — and only for the failed tail that local OCR
+    couldn't read. Reads the preserved source PDF from each output/<slug>/ directory.
+    """
+    _setup_logging(settings.outbox)
+    manifest_path = settings.outbox / "_manifest.json"
+    if not manifest_path.exists():
+        logger.info("No manifest at %s — run `extract` first.", manifest_path)
+        return
+    manifest = json.loads(manifest_path.read_text())
+    by_slug = {e["slug"]: e for e in manifest}
+    failed = [e for e in manifest if e.get("status") == "failed"]
+    if limit is not None:
+        failed = failed[:limit]
+    if not failed:
+        logger.info("No failed recipes to escalate.")
+        return
+
+    logger.info("Escalating %d failed recipe(s) to %s", len(failed), settings.openrouter_ocr_model)
+    run_start = time.perf_counter()
+    for i, e in enumerate(failed, 1):
+        slug = e["slug"]
+        src = settings.outbox / slug / e["source"]
+        if not src.exists():
+            logger.warning("  [%d/%d] %s: source PDF missing, skipping", i, len(failed), slug)
+            continue
+        logger.info("[%d/%d] escalating %s", i, len(failed), slug)
+        t = time.perf_counter()
+        try:
+            recipe, report = extract_recipe(
+                settings, ingest.RecipeJob(pdf_path=src, slug=slug), ocr_backend="openrouter"
+            )
+            by_slug[slug].update(
+                status=str(report.status), confidence=report.confidence,
+                uploadable=report.uploadable(),
+                ingredients=len(recipe.ingredients), steps=len(recipe.instructions),
+                flags=[f.code for f in report.flags], escalated=True,
+            )
+            logger.info("  -> %s (%.1fs)", report.status, time.perf_counter() - t)
+        except Exception as exc:  # noqa: BLE001 - isolate failures so the batch continues
+            logger.exception("  -> ERROR escalating %s: %s", slug, exc)
+
+    updated = list(by_slug.values())
+    manifest_path.write_text(json.dumps(updated, indent=2))
+    _log_summary(updated, time.perf_counter() - run_start)
 
 
 def _log_summary(manifest: list[dict], elapsed: float) -> None:
