@@ -78,3 +78,31 @@ class Recipe(BaseModel):
             if f.value is not None and f.provenance == Provenance.ESTIMATED:
                 out.append(fname)
         return out
+
+
+class ReviewStatus(StrEnum):
+    """Outcome of the quality gate."""
+
+    OK = "ok"  # clean — eligible for upload
+    NEEDS_REVIEW = "needs_review"  # held: looks dubious, a human should check
+    FAILED = "failed"  # held: hard failure (faint/blank scan, empty OCR) — likely unusable
+
+
+class ReviewFlag(BaseModel):
+    """One reason a recipe was held for review."""
+
+    code: str  # e.g. faint_scan, empty_ocr, ocr_divergence, unclear_spans, missing_*, llm_dubious
+    severity: str  # "fail" (hard) | "warn" (soft)
+    detail: str
+
+
+class ReviewReport(BaseModel):
+    """Quality assessment for one extracted recipe. Flagged recipes are HELD from upload."""
+
+    status: ReviewStatus
+    confidence: float | None = None  # 0-1, from the LLM review pass
+    flags: list[ReviewFlag] = Field(default_factory=list)
+
+    def uploadable(self) -> bool:
+        """Only clean recipes upload; needs_review and failed are both held back."""
+        return self.status == ReviewStatus.OK

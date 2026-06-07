@@ -47,3 +47,20 @@ Rules:
    estimates are added later in a separate, clearly-labeled step. Do not guess them here.
 5. Return the structured result in the requested schema. Do not add fields the card doesn't support.
 """
+
+# The model sees: the structured recipe (as text) + the original page image(s).
+REVIEW_SYSTEM_PROMPT = """\
+You are a quality reviewer for a recipe digitization pipeline. You are given a structured recipe
+that was extracted from a scanned image, plus the original image. Judge whether the extraction
+is trustworthy enough to keep without a human checking it.
+
+Compare the recipe against the image and consider:
+- Does the recipe capture what's actually on the card (title, ingredients, steps)?
+- Are there signs the scan was too faint/cropped/garbled to read reliably?
+- Do quantities and ingredients look plausible and match the image where you can tell?
+- Is anything important obviously missing or garbled?
+
+Respond with ONLY a JSON object, no prose:
+{"confidence": <0.0-1.0>, "looks_complete": <true|false>, "issues": ["short issue", ...]}
+confidence is your overall trust in the extraction. List concrete issues (empty list if none).
+"""

@@ -1,28 +1,34 @@
 """End-to-end extraction: one recipe PDF -> a reviewed :class:`Recipe` written to ``output/``.
 
-This is the orchestration glue. The early stages (discover, render) are real; the per-page
-stages call the (currently stubbed) processing modules, so running it today exercises the wiring
-and stops at the first unimplemented stage with a clear message.
+Orchestration glue. Early stages (discover, render, OCR, reconcile, review signals) are real;
+``structure``/``enrich`` are still stubbed, so running it today exercises the wiring and stops
+at the first unimplemented stage. Quality flags are accumulated throughout and written to a
+``review.json`` that gates upload (flagged recipes are HELD).
 
-Flow:  ingest -> render -> preprocess -> segment -> OCR x2 -> reconcile -> structure -> enrich.
+Flow:  ingest -> render -> preprocess -> OCR x2 -> reconcile -> structure -> enrich -> review.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from PIL import Image
+
 from recipe_pipeline import enrich as enrich_mod
-from recipe_pipeline import ingest, pdf, preprocess, reconcile, structure
+from recipe_pipeline import ingest, pdf, preprocess, reconcile, review, structure
 from recipe_pipeline.htr import get_backend
+from recipe_pipeline.schema import ReviewFlag
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from recipe_pipeline.config import Settings
     from recipe_pipeline.ingest import RecipeJob
-    from recipe_pipeline.schema import Recipe
+    from recipe_pipeline.schema import Recipe, ReviewReport
 
 
-def extract_recipe(settings: Settings, job: RecipeJob) -> Recipe:
-    """Run the full extraction pipeline for one recipe PDF and return the structured recipe."""
+def extract_recipe(settings: Settings, job: RecipeJob) -> tuple[Recipe, ReviewReport]:
+    """Run the full pipeline for one recipe PDF; return the recipe and its review report."""
     out_dir = settings.outbox / job.slug
     pages_dir = out_dir / "pages"
     page_images = pdf.render_pages_to_dir(job.pdf_path, pages_dir)
@@ -30,29 +36,62 @@ def extract_recipe(settings: Settings, job: RecipeJob) -> Recipe:
     ocr_a = get_backend(settings.ocr_a)
     ocr_b = get_backend(settings.ocr_b)
 
+    flags: list[ReviewFlag] = []
     reconciled_pages: list[str] = []
     for page_path in page_images:
-        from PIL import Image
+        page_img = Image.open(page_path)
+        # Faintness is judged on the raw scan, before any correction.
+        faint = review.assess_image(page_img)
+        if faint:
+            flags.append(faint)
 
-        page_img = preprocess.orient_and_deskew(Image.open(page_path), settings)
-        text_a = ocr_a.transcribe_page(page_img).text
-        text_b = ocr_b.transcribe_page(page_img).text
-        reconciled_pages.append(
-            reconcile.reconcile(
-                settings,
-                transcript_a=text_a,
-                transcript_b=text_b,
-                page_image=page_path,
-                label_a=settings.ocr_a,
-                label_b=settings.ocr_b,
-            )
+        upright = preprocess.orient_and_deskew(page_img, settings)
+        text_a = ocr_a.transcribe_page(upright).text
+        text_b = ocr_b.transcribe_page(upright).text
+        flags.extend(review.assess_ocr(text_a, text_b))
+
+        reconciled = reconcile.reconcile(
+            settings,
+            transcript_a=text_a,
+            transcript_b=text_b,
+            page_image=page_path,
+            label_a=settings.ocr_a,
+            label_b=settings.ocr_b,
         )
+        unclear = review.assess_unclear(reconciled)
+        if unclear:
+            flags.append(unclear)
+        reconciled_pages.append(reconciled)
 
     recipe = structure.structure(
         settings, reconciled_pages=reconciled_pages, source_pdf=str(job.pdf_path)
     )
     recipe = enrich_mod.enrich(settings, recipe)
-    return recipe
+
+    # Structure + vision-LLM review.
+    flags.extend(review.assess_structure(recipe))
+    confidence, llm_flags = review.llm_review(settings, recipe, page_images)
+    flags.extend(llm_flags)
+    report = review.build_report(flags, confidence=confidence)
+
+    _write_outputs(out_dir, recipe, report, reconciled_pages, source_pdf=job.pdf_path)
+    return recipe, report
+
+
+def _write_outputs(
+    out_dir: Path,
+    recipe: Recipe,
+    report: ReviewReport,
+    reconciled_pages: list[str],
+    *,
+    source_pdf: Path,
+) -> None:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "recipe.json").write_text(recipe.model_dump_json(indent=2))
+    (out_dir / "review.json").write_text(report.model_dump_json(indent=2))
+    (out_dir / "reconciled.txt").write_text("\n\n".join(reconciled_pages))
+    # Preserve the original scan alongside the outputs.
+    (out_dir / source_pdf.name).write_bytes(source_pdf.read_bytes())
 
 
 def extract_all(settings: Settings) -> None:
@@ -63,4 +102,6 @@ def extract_all(settings: Settings) -> None:
         return
     for job in jobs:
         print(f"Processing {job.source_name} -> output/{job.slug}/")
-        extract_recipe(settings, job)
+        _, report = extract_recipe(settings, job)
+        held = "" if report.uploadable() else "  [HELD: needs review]"
+        print(f"  status={report.status}{held}")

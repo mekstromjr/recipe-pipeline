@@ -37,8 +37,9 @@ class Settings(BaseSettings):
     mealie_api_token: str | None = None
 
     # --- OCR backends: two DIFFERENT architectures for the consensus step ---
-    ocr_a: str = "trocr"
-    ocr_b: str = "kraken"
+    # Apple Vision leads on legible cursive (bake-off: 3% vs TrOCR 16% CER); TrOCR is engine B.
+    ocr_a: str = "applevision"
+    ocr_b: str = "trocr"
 
     # --- Directories (resolved relative to the project root if not absolute) ---
     input_dir: Path = Field(default=Path("inbox"))
