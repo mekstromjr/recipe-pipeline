@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from recipe_pipeline import enrich as enrich_mod
-from recipe_pipeline import ingest, pdf, preprocess, reconcile, segment, structure
+from recipe_pipeline import ingest, pdf, preprocess, reconcile, structure
 from recipe_pipeline.htr import get_backend
 
 if TYPE_CHECKING:
@@ -35,11 +35,8 @@ def extract_recipe(settings: Settings, job: RecipeJob) -> Recipe:
         from PIL import Image
 
         page_img = preprocess.orient_and_deskew(Image.open(page_path), settings)
-        lines = segment.segment_lines(page_img)
-        lines_a = ocr_a.transcribe_lines(lines)
-        lines_b = ocr_b.transcribe_lines(lines)
-        text_a = "\n".join(line.text for line in lines_a)
-        text_b = "\n".join(line.text for line in lines_b)
+        text_a = ocr_a.transcribe_page(page_img).text
+        text_b = ocr_b.transcribe_page(page_img).text
         reconciled_pages.append(
             reconcile.reconcile(
                 settings, transcript_a=text_a, transcript_b=text_b, page_image=page_path

@@ -10,16 +10,20 @@ dependencies = [
     "pillow>=11.1.0",
     "pypdfium2>=4.30.0",
     "deskew>=1.5.1",
+    "jiwer>=3.1.0",
 ]
 
 [project.optional-dependencies]
-# Heavy OCR / ML stack — only needed once the HTR backends + bake-off are implemented.
-# Kept out of the base install so the skeleton stays light (`uv sync` is fast).
+# Apple Vision OCR backend (on-device, macOS only) — the zero-friction baseline engine.
+apple = [
+    "pyobjc-framework-Vision>=11.0",
+    "pyobjc-framework-Quartz>=11.0",
+]
+# Heavy OCR / ML stack — the "better alternative" engines benchmarked against Apple Vision.
 ml = [
     "torch>=2.6.0",
     "transformers>=4.49.0",
     "kraken>=5.3.0",
-    "jiwer>=3.1.0",
 ]
 
 [project.scripts]

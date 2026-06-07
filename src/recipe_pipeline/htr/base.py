@@ -1,14 +1,15 @@
 """HTR backend protocol + registry.
 
-A backend takes line images (from the segmentation stage) and returns transcribed text, ideally
-with a confidence score and bounding box. Confidence is optional because not every engine
-exposes it (TrOCR's is unreliable; Kraken's is per-character and solid) — the reconcile stage
-does not depend on it.
+A backend transcribes a whole page image and returns the text plus, where available, per-line
+detail (text, confidence, bbox). Backends own their own layout/segmentation: Apple Vision and
+Kraken segment internally; the TrOCR backend runs a line detector behind the same interface.
+Confidence is optional because not every engine exposes a reliable one — the bake-off scores on
+text, and the reconcile stage grounds on the image rather than depending on OCR confidence.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
@@ -21,7 +22,19 @@ class OcrLine:
 
     text: str
     confidence: float | None = None
-    bbox: tuple[int, int, int, int] | None = None  # (x0, y0, x1, y1) in page pixels
+    bbox: tuple[float, float, float, float] | None = None  # normalized (x0, y0, x1, y1)
+
+
+@dataclass
+class PageResult:
+    """A backend's transcription of one page."""
+
+    text: str
+    lines: list[OcrLine] = field(default_factory=list)
+
+    @classmethod
+    def from_lines(cls, lines: list[OcrLine]) -> PageResult:
+        return cls(text="\n".join(line.text for line in lines), lines=lines)
 
 
 @runtime_checkable
@@ -30,8 +43,8 @@ class HTRBackend(Protocol):
 
     name: str
 
-    def transcribe_lines(self, line_images: list[Image.Image]) -> list[OcrLine]:
-        """Transcribe pre-segmented line images, in order."""
+    def transcribe_page(self, image: Image.Image) -> PageResult:
+        """Transcribe a full page image (the backend handles its own line segmentation)."""
         ...
 
 
@@ -43,12 +56,16 @@ _REGISTRY: dict[str, str] = {
 }
 
 
+def known_backends() -> list[str]:
+    return sorted(_REGISTRY)
+
+
 def get_backend(name: str) -> HTRBackend:
     """Instantiate a backend by name. Raises ``KeyError`` for unknown names."""
     import importlib
 
     if name not in _REGISTRY:
-        raise KeyError(f"Unknown OCR backend {name!r}. Known: {sorted(_REGISTRY)}")
+        raise KeyError(f"Unknown OCR backend {name!r}. Known: {known_backends()}")
     module_path, factory = _REGISTRY[name].split(":")
     mod = importlib.import_module(module_path)
     return getattr(mod, factory)()
