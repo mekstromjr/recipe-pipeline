@@ -1,0 +1,22 @@
+# Secrets
+.env
+
+# Python
+__pycache__/
+.venv/
+*.egg-info/
+.pytest_cache/
+
+# Pipeline data — scans, rendered pages, and outputs are local only (not versioned).
+# Keep the directories (via .gitkeep) but ignore their contents.
+inbox/*
+!inbox/.gitkeep
+output/*
+!output/.gitkeep
+samples/*
+!samples/.gitkeep
+
+# Model / HF caches that may land in-tree
+.cache/
+*.safetensors
+*.mlmodel

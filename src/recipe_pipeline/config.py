@@ -1,0 +1,64 @@
+"""Runtime configuration, loaded from environment / `.env` (prefix ``RECIPE_``)."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Project root = two levels up from this file (src/recipe_pipeline/config.py -> project root).
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+class Settings(BaseSettings):
+    """All tunables. Override any field via a ``RECIPE_<FIELD>`` env var or `.env` entry."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="RECIPE_",
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    # --- Local reconcile model (Ollama on this Mac) ---
+    ollama_host: str = "http://localhost:11434"
+    # Vision-capable model that reconciles the two OCR transcripts against the page image.
+    # NOTE: confirm this tag accepts image input via Ollama; fallback is a Qwen2.5-VL tag.
+    reconcile_model: str = "gemma4:26b-mlx-32k"
+
+    # --- Metadata enrichment via SearXNG (port-forward svc/searxng; JSON API) ---
+    searxng_url: str = "http://localhost:8888"
+
+    # --- Mealie upload target (port-forward svc/mealie; plain ClusterIP, no Authentik) ---
+    mealie_url: str = "http://localhost:9000"
+    mealie_api_token: str | None = None
+
+    # --- OCR backends: two DIFFERENT architectures for the consensus step ---
+    ocr_a: str = "trocr"
+    ocr_b: str = "kraken"
+
+    # --- Directories (resolved relative to the project root if not absolute) ---
+    input_dir: Path = Field(default=Path("inbox"))
+    output_dir: Path = Field(default=Path("output"))
+    samples_dir: Path = Field(default=Path("samples"))
+
+    def _resolve(self, p: Path) -> Path:
+        return p if p.is_absolute() else (PROJECT_ROOT / p)
+
+    @property
+    def inbox(self) -> Path:
+        return self._resolve(self.input_dir)
+
+    @property
+    def outbox(self) -> Path:
+        return self._resolve(self.output_dir)
+
+    @property
+    def samples(self) -> Path:
+        return self._resolve(self.samples_dir)
+
+
+def load_settings() -> Settings:
+    """Construct :class:`Settings`. Kept as a function so tests can patch the environment."""
+    return Settings()
