@@ -23,10 +23,10 @@ class Settings(BaseSettings):
 
     # --- Local models (Ollama on this Mac) ---
     ollama_host: str = "http://localhost:11434"
-    # Reconcile needs a VISION-capable model (must see the page image). gemma4:e4b advertises
-    # the `vision` capability; the gemma4 MLX tags are text-only. Verify with `ollama show`.
-    reconcile_model: str = "gemma4:e4b"
-    # Text-LLM stages (structure, enrich). Defaults to e4b: it honors Ollama JSON-schema output
+    # VISION model (the review pass sees the page image). gemma4:e4b advertises the `vision`
+    # capability; the gemma4 MLX tags are text-only. Verify with `ollama show`.
+    vision_model: str = "gemma4:e4b"
+    # Text-LLM stages (structure, enrich, orientation A/B). e4b honors Ollama JSON-schema output
     # and is fast. (The gemma4 MLX tags are slow and ignore structured-output format.)
     enrich_model: str = "gemma4:e4b"
     # Context window per Ollama request. Ollama's default (~4096) silently TRUNCATES longer
@@ -41,10 +41,9 @@ class Settings(BaseSettings):
     mealie_url: str = "http://localhost:9000"
     mealie_api_token: str | None = None
 
-    # --- OCR backends: two DIFFERENT architectures for the consensus step ---
-    # Apple Vision leads on legible cursive (bake-off: 3% vs TrOCR 16% CER); TrOCR is engine B.
+    # --- OCR backend (single engine). Apple Vision: accurate, on-device, orientation-tolerant.
+    # (TrOCR was removed — universally worse on this corpus and it broke the divergence gate.)
     ocr_a: str = "applevision"
-    ocr_b: str = "trocr"
 
     # --- Directories (resolved relative to the project root if not absolute) ---
     input_dir: Path = Field(default=Path("inbox"))

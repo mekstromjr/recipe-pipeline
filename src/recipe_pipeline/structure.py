@@ -1,10 +1,10 @@
-"""Turn reconciled transcription(s) into a structured :class:`~recipe_pipeline.schema.Recipe`.
+"""Turn the OCR transcription into a structured :class:`~recipe_pipeline.schema.Recipe`.
 
 Also applies the relevance filter for newspaper clippings (see prompts.STRUCTURE_SYSTEM_PROMPT):
 recipe content only; keep+[UNCLEAR] when unsure rather than silently dropping; quaint off-recipe
 text -> ``source_curiosities``. All produced fields are ``Provenance.FROM_CARD`` here —
-enrichment/estimates are added later, separately. The verbatim transcription (from the faithful
-OCR) is preserved on ``original_transcription`` per the keep-original decision.
+enrichment/estimates are added later, separately. The verbatim OCR text is preserved on
+``original_transcription`` per the keep-original decision.
 """
 
 from __future__ import annotations
@@ -50,16 +50,16 @@ def _json_only(text: str) -> str:
 def structure(
     settings: Settings,
     *,
-    reconciled_pages: list[str],
+    ocr_pages: list[str],
     source_pdf: str,
     verbatim: str | None = None,
 ) -> Recipe:
-    """Build a :class:`Recipe` from the per-page reconciled text (concatenated into one recipe)."""
-    reconciled = "\n\n".join(reconciled_pages)
+    """Build a :class:`Recipe` from the per-page OCR text (concatenated into one recipe)."""
+    ocr_text = "\n\n".join(ocr_pages)
     reply = ollama_client.chat(
         settings,
         system=STRUCTURE_SYSTEM_PROMPT,
-        user=f"Reconciled transcription (all pages):\n\n{reconciled}",
+        user=f"OCR transcription (all pages):\n\n{ocr_text}",
         model=settings.enrich_model,  # text model
         format=StructuredCard.model_json_schema(),
     )
@@ -76,6 +76,6 @@ def structure(
         cook_time=_from_card(card.cook_time),
         total_time=_from_card(card.total_time),
         source_curiosities=card.source_curiosities,
-        original_transcription=verbatim if verbatim is not None else reconciled,
+        original_transcription=verbatim if verbatim is not None else ocr_text,
         source_pdf=source_pdf,
     )

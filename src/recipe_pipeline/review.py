@@ -2,11 +2,10 @@
 
 Layered signals, cheapest first:
   1. image faintness  (near-blank/too-faint scan)        -> fail
-  2. empty OCR        (engines found ~nothing)           -> fail
-  3. OCR divergence   (the two transcripts disagree a lot)-> warn
-  4. [UNCLEAR] spans  (unresolved bits from reconcile)   -> warn (many -> fail)
-  5. structure        (missing title/ingredients/steps)  -> fail/warn
-  6. LLM review        (vision model rates the result)    -> warn/fail by confidence
+  2. empty OCR        (engine found ~nothing)            -> fail
+  3. [UNCLEAR] spans  (unresolved bits flagged by structure) -> warn (many -> fail)
+  4. structure        (missing title/ingredients/steps)  -> fail/warn
+  5. LLM review        (vision model rates the result)    -> warn/fail by confidence
 
 Flagged recipes (status != ok) are HELD from upload. Reasons travel with the recipe.
 """
@@ -32,8 +31,7 @@ if TYPE_CHECKING:
 # Tunable thresholds (validated empirically against real scans).
 FAINT_DARK_FRACTION = 0.004  # <0.4% truly-dark pixels => near-blank/too faint
 FAINT_STD = 18.0  # low global contrast => washed out
-EMPTY_OCR_CHARS = 12  # both transcripts shorter than this => nothing found
-DIVERGENCE_CER = 0.6  # A-vs-B char error above this => engines strongly disagree
+EMPTY_OCR_CHARS = 12  # OCR shorter than this => nothing found
 MANY_UNCLEAR = 6  # this many [UNCLEAR] spans => hard fail
 LLM_FAIL_CONFIDENCE = 0.4
 LLM_WARN_CONFIDENCE = 0.7
@@ -53,29 +51,11 @@ def assess_image(image: Image.Image) -> ReviewFlag | None:
     return None
 
 
-def assess_ocr(text_a: str, text_b: str) -> list[ReviewFlag]:
-    """Flag empty OCR and strong A-vs-B divergence."""
-    import jiwer
-
-    flags: list[ReviewFlag] = []
-    a, b = text_a.strip(), text_b.strip()
-    if len(a) < EMPTY_OCR_CHARS and len(b) < EMPTY_OCR_CHARS:
-        flags.append(
-            ReviewFlag(code="empty_ocr", severity="fail", detail="both OCR engines found ~nothing")
-        )
-        return flags  # divergence is meaningless if both are empty
-    if a and b:
-        cer = jiwer.cer(a.lower(), b.lower())
-        if cer > DIVERGENCE_CER:
-            # Strong cross-engine disagreement is a significant issue -> hold.
-            flags.append(
-                ReviewFlag(
-                    code="ocr_divergence",
-                    severity="fail",
-                    detail=f"OCR engines disagree strongly (A/B CER={cer:.2f})",
-                )
-            )
-    return flags
+def assess_ocr(text: str) -> list[ReviewFlag]:
+    """Flag a page where OCR found essentially nothing (blank/illegible scan)."""
+    if len(text.strip()) < EMPTY_OCR_CHARS:
+        return [ReviewFlag(code="empty_ocr", severity="fail", detail="OCR found ~nothing")]
+    return []
 
 
 def assess_unclear(reconciled_text: str) -> ReviewFlag | None:
@@ -122,7 +102,7 @@ def llm_review(
         system=REVIEW_SYSTEM_PROMPT,
         user=f"Structured recipe:\n{recipe_text}\n\nReview it against the page image(s).",
         images=page_images,
-        model=settings.reconcile_model,  # the vision model
+        model=settings.vision_model,
     )
     data = _parse_json(reply)
     confidence = float(data.get("confidence", 0.0))

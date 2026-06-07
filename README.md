@@ -3,61 +3,64 @@
 Digitize old family recipes — handwritten cards and newspaper clippings — and upload them to
 the self-hosted **Mealie** server, preserving the original scan as a permanent record.
 
-> **Status:** scaffold / skeleton. Tracking issue:
-> [meklab/home#36](https://gitlab.meklab.net/meklab/home/-/issues/36)
-> (milestone *meklab: Recipe Pipeline*). The processing stages are stubbed (`NotImplementedError`)
-> pending the OCR bake-off — see [Roadmap](#roadmap).
+> **Status:** working end-to-end (extract → reviewed output); Mealie upload is manual/bulk.
+> Tracking issue: [meklab/home#36](https://gitlab.meklab.net/meklab/home/-/issues/36)
+> (milestone *meklab: Recipe Pipeline*).
 
 ## What it does
 
 ```
 inbox/*.pdf                         # one scanned PDF = one recipe (multi-page OK)
   → render pages to images          (pypdfium2, no system deps)
-  → orient + deskew                 (fix sideways/upside-down + small tilt) BEFORE OCR
-  → segment into text lines
-  → OCR ×2                          (two DIFFERENT-architecture local engines)
-  → reconcile                       (local vision LLM sees BOTH transcripts + the page image,
-                                      resolves disagreements, marks [UNCLEAR] when it can't)
-  → structure + relevance filter    (recipe fields; carefully drop unrelated clipping text;
-                                      quaint off-recipe bits → extras.source_curiosities)
+  → OCR                             (Apple Vision, on-device — reads any orientation)
+  → detect orientation              (90/270 by text volume; 0-vs-180 by a text-model A/B check);
+                                      reverse line order for 180; make an upright copy for review/display
+  → structure + relevance filter    (local LLM, JSON-schema: recipe fields; drop unrelated
+                                      clipping text; quaint off-recipe bits → extras.source_curiosities)
   → enrich (additive only)          (local model + SearXNG: cuisine, meal, dish history,
                                       estimated times/servings — never alters card content)
   → assemble recipe JSON w/ provenance (from_card vs enriched vs estimated)
-  → REVIEW GATE                     (you eyeball output/<slug>/ before anything is uploaded)
-  → upload to Mealie                (recipe + page-1 image + the ORIGINAL PDF as an asset)
+  → REVIEW GATE                     (faint/empty/[UNCLEAR]/missing/low-confidence → HELD;
+                                      only clean recipes are eligible to upload)
+  → (manual) bulk-import to Mealie  (recipe + upright page image + the ORIGINAL PDF as an asset)
 ```
 
 ### Why this design (not "just ask GPT to read it")
 
-Pure vision-LLM transcription is **rejected for this use case**: on ambiguous handwriting LLMs
-silently emit a plausible-but-wrong word (in one study GPT-4o was wrong 64% of the time on
-genuinely unclear characters) rather than flagging doubt — a silent `1 tsp → 1 tbsp` or
-`baking soda → baking powder` would survive review *because it looks right*.
+Pure vision-LLM transcription is **rejected as the source of truth**: on ambiguous handwriting
+LLMs silently emit a plausible-but-wrong word (in one study GPT-4o was wrong 64% of the time on
+genuinely unclear characters) rather than flagging doubt — a silent `1 tsp → 1 tbsp` would
+survive review *because it looks right*. (We confirmed this locally: the vision model hallucinated
+a whole fake recipe from a rotated scan.)
 
-Instead, two **different-architecture** OCR engines transcribe independently, and a
-**vision** LLM reconciles them **against the original image** (not just the two text strings).
-A peer-reviewed 2025 study found this hybrid reaches **CER 1.8% / WER 3.5%** — a 68–72%
-improvement over either an LLM or a dedicated OCR engine alone. Where the engines disagree and
-the image can't resolve it, the text is marked `[UNCLEAR]` for human review.
+So **Apple Vision does the transcription** — it's accurate on this corpus (~3% CER on legible
+cursive in our bake-off), on-device/private, free, and orientation-tolerant. A local LLM only
+*structures* Apple Vision's text into recipe fields and *adds* metadata; it never overrides what
+the OCR read. (An earlier two-engine + image-grounded-reconcile design was removed: the second
+engine, TrOCR, was universally worse here and its disagreement with Apple Vision broke the quality
+gate, while feeding the LLM raw images caused rotation hallucinations.)
 
 Everything that *adds* information (dish history, cuisine, estimated cook time) is kept strictly
-separate from what was actually on the card, via per-field **provenance** and Mealie's `extras`.
+separate from what was actually on the card, via per-field **provenance** and Mealie's `extras`;
+the verbatim OCR text is preserved on `original_transcription`.
 
 ## Quickstart
 
 ```bash
 cd recipe-pipeline
-uv sync                       # light skeleton; add the OCR/ML stack later with: uv sync --extra ml
+uv sync --extra apple         # Apple Vision OCR backend (macOS); core deps are light
 cp .env.example .env          # then edit
 uv run recipe-pipeline --help
 ```
 
-Drop one scanned PDF per recipe into `inbox/`, then (once implemented):
+Drop scanned PDFs (one per recipe) into `inbox/`, then:
 
 ```bash
-uv run recipe-pipeline extract        # PDF -> reviewed recipe JSON in output/<slug>/
-# ...review output/<slug>/recipe.md...
-uv run recipe-pipeline upload <slug>  # push the approved recipe to Mealie
+uv run recipe-pipeline extract            # all of inbox/ -> reviewed output/<slug>/
+uv run recipe-pipeline extract --limit 20 # sample batch (process 20 new recipes)
+uv run recipe-pipeline extract --force    # reprocess everything (default: skip already-done)
+# ...review output/<slug>/recipe.md + output/_manifest.json...
+# then bulk-import the OK recipes to Mealie (manual)
 ```
 
 ## Mealie API mapping (verified against the live v3.19.1 instance)
@@ -89,26 +92,17 @@ API token gives clean API access. SearXNG's JSON API needs the same port-forward
 | Path | Role |
 |---|---|
 | `src/recipe_pipeline/config.py` | settings (pydantic-settings, `RECIPE_` env prefix) |
-| `src/recipe_pipeline/schema.py` | internal `Recipe` model + per-field provenance |
-| `src/recipe_pipeline/prompts.py` | reconcile/structure system prompts incl. relevance rules |
+| `src/recipe_pipeline/schema.py` | internal `Recipe` model + per-field provenance + review report |
+| `src/recipe_pipeline/prompts.py` | structure/review system prompts incl. relevance rules |
 | `src/recipe_pipeline/pdf.py` | render PDF pages → images (pypdfium2) |
 | `src/recipe_pipeline/ingest.py` | discover `inbox/*.pdf` → jobs |
-| `src/recipe_pipeline/preprocess.py` | orient + deskew (stub) |
-| `src/recipe_pipeline/segment.py` | line/layout segmentation (stub) |
-| `src/recipe_pipeline/htr/` | pluggable OCR backends: `trocr`, `kraken`, `applevision` (stubs) |
-| `src/recipe_pipeline/reconcile.py` | image-grounded reconcile via Ollama (stub) |
-| `src/recipe_pipeline/structure.py` | reconciled text → recipe fields + relevance filter (stub) |
-| `src/recipe_pipeline/enrich.py` | SearXNG-backed metadata enrichment (stub) |
-| `src/recipe_pipeline/mealie.py` | Mealie API client (stub; verified mapping in docstring) |
-| `src/recipe_pipeline/bakeoff.py` | CER/WER OCR comparison harness (stub) |
-| `src/recipe_pipeline/extract.py` | end-to-end orchestration (stub glue) |
+| `src/recipe_pipeline/preprocess.py` | orientation detection + upright image (for review/display) |
+| `src/recipe_pipeline/htr/` | OCR backend interface + `applevision` (Apple Vision, on-device) |
+| `src/recipe_pipeline/structure.py` | OCR text → recipe fields + relevance filter |
+| `src/recipe_pipeline/enrich.py` | SearXNG-backed additive metadata enrichment |
+| `src/recipe_pipeline/review.py` | quality gate (faint/empty/[UNCLEAR]/structure/LLM review) |
+| `src/recipe_pipeline/mealie.py` | Mealie API client (verified mapping; manual bulk import) |
+| `src/recipe_pipeline/render.py` | recipe → markdown for human review |
+| `src/recipe_pipeline/bakeoff.py` | CER/WER OCR comparison harness |
+| `src/recipe_pipeline/extract.py` | end-to-end batch orchestration (resumable; manifest) |
 | `src/recipe_pipeline/cli.py` | `extract` / `upload` / `bakeoff` commands |
-
-## Roadmap
-
-1. **OCR bake-off** — implement the HTR backends + segmentation + `bakeoff.py`, then run on a
-   handful of real cursive cards (with hand-typed ground truth in `samples/`) to pick the OCR
-   pair empirically. Escalation for a stubborn hand: fine-tune Kraken on ~20–30 samples.
-2. **Reconcile** — verify the local vision model accepts images; wire `reconcile.py`.
-3. **Enrich + structure** — SearXNG client, structuring + relevance filter, orchestrate `extract`.
-4. **Upload** — `mealie.py` against the live API (port-forward + token).

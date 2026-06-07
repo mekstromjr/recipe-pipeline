@@ -1,7 +1,7 @@
 [project]
 name = "recipe-pipeline"
 version = "0.1.0"
-description = "Digitize handwritten/clipping family recipes (scan PDF -> 2x local OCR -> image-grounded reconcile -> enrich -> Mealie)"
+description = "Digitize handwritten/clipping family recipes (scan PDF -> Apple Vision OCR -> structure -> enrich -> Mealie)"
 requires-python = ">=3.12"
 dependencies = [
     "httpx>=0.28.1",
@@ -14,19 +14,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Apple Vision OCR backend (on-device, macOS only) — the zero-friction baseline engine.
+# Apple Vision OCR backend (on-device, macOS only) — the production OCR engine.
 apple = [
     "pyobjc-framework-Vision>=11.0",
     "pyobjc-framework-Quartz>=11.0",
-]
-# TrOCR backend (transformer) — engine B, benchmarked against Apple Vision.
-trocr = [
-    "torch>=2.6.0",
-    "transformers>=4.49.0",
-]
-# Kraken backend (CNN-RNN/CTC) — heavier; its real payoff is fine-tuning on a specific hand.
-kraken = [
-    "kraken>=5.3.0",
 ]
 
 [project.scripts]

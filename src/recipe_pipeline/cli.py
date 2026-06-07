@@ -39,8 +39,8 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p_bakeoff.add_argument(
         "--backends",
-        default="trocr,kraken",
-        help="Comma-separated backend names to compare (default: trocr,kraken).",
+        default="applevision",
+        help="Comma-separated backend names to compare (default: applevision).",
     )
     p_bakeoff.set_defaults(func=_cmd_bakeoff)
 

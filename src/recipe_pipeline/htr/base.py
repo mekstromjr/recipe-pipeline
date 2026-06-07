@@ -1,10 +1,8 @@
-"""HTR backend protocol + registry.
+"""OCR backend protocol + registry.
 
 A backend transcribes a whole page image and returns the text plus, where available, per-line
-detail (text, confidence, bbox). Backends own their own layout/segmentation: Apple Vision and
-Kraken segment internally; the TrOCR backend runs a line detector behind the same interface.
-Confidence is optional because not every engine exposes a reliable one — the bake-off scores on
-text, and the reconcile stage grounds on the image rather than depending on OCR confidence.
+detail (text, confidence, bbox). Apple Vision is the production engine (accurate, on-device,
+orientation-tolerant); the registry keeps the interface pluggable for future engines.
 """
 
 from __future__ import annotations
@@ -50,8 +48,6 @@ class HTRBackend(Protocol):
 
 # Backend identifier -> dotted import path of a factory `build() -> HTRBackend`.
 _REGISTRY: dict[str, str] = {
-    "trocr": "recipe_pipeline.htr.trocr:build",
-    "kraken": "recipe_pipeline.htr.kraken:build",
     "applevision": "recipe_pipeline.htr.applevision:build",
 }
 

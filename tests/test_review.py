@@ -54,14 +54,11 @@ def test_assess_structure_flags_missing_parts():
     assert review.assess_structure(_recipe()) == []
 
 
-def test_assess_ocr_empty_and_divergence():
-    empty = review.assess_ocr("", "  ")
-    assert any(f.code == "empty_ocr" for f in empty)
-    # very different strings of adequate length -> divergence warning
-    div = review.assess_ocr("the quick brown fox jumps", "zzz qqq vvv www mmm ккк")
-    assert any(f.code == "ocr_divergence" for f in div)
-    # near-identical -> no flags
-    assert review.assess_ocr("2 cups flour and sugar", "2 cups flour and sugar") == []
+def test_assess_ocr_empty():
+    # near-empty OCR -> empty_ocr fail flag
+    assert any(f.code == "empty_ocr" for f in review.assess_ocr("  "))
+    # adequate text -> no flags
+    assert review.assess_ocr("2 cups flour and sugar, mix well") == []
 
 
 def test_assess_unclear_thresholds():

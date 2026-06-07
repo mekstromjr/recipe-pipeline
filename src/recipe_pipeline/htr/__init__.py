@@ -1,8 +1,5 @@
-"""Pluggable OCR/HTR backends.
-
-Two *different-architecture* backends transcribe each page independently; their disagreement is
-the signal the reconcile stage uses. The concrete backend is chosen empirically by the bake-off.
-"""
+"""Pluggable OCR/HTR backends. Apple Vision is the production engine; the interface stays
+pluggable for future engines."""
 
 from recipe_pipeline.htr.base import (
     HTRBackend,

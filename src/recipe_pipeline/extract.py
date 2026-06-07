@@ -1,9 +1,9 @@
 """End-to-end extraction: scanned recipe PDFs -> reviewed recipe output under ``output/``.
 
-Per-recipe flow:  render -> preprocess -> OCR x2 -> reconcile -> structure -> enrich -> review.
-Significant failures are HELD; minor issues upload with an Import Software Note. No Mealie upload
-(recipes are bulk-imported manually). A run logs per-stage progress to the console and
-``output/run.log`` and writes a summary ``output/_manifest.json``.
+Per-recipe flow:  render -> preprocess (orient/deskew) -> OCR (Apple Vision) -> structure ->
+enrich -> review. Significant failures are HELD; minor issues upload with an Import Software Note.
+No Mealie upload (recipes are bulk-imported manually). A run logs per-stage progress to the
+console and ``output/run.log`` and writes a summary ``output/_manifest.json``.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 from PIL import Image
 
 from recipe_pipeline import enrich as enrich_mod
-from recipe_pipeline import ingest, pdf, preprocess, reconcile, render, review, structure
+from recipe_pipeline import ingest, pdf, preprocess, render, review, structure
 from recipe_pipeline.htr import get_backend
 from recipe_pipeline.schema import ReviewFlag
 
@@ -61,44 +61,42 @@ def extract_recipe(settings: Settings, job: RecipeJob) -> tuple[Recipe, ReviewRe
     with _stage("render"):
         page_images = pdf.render_pages_to_dir(job.pdf_path, out_dir / "pages")
 
-    ocr_a = get_backend(settings.ocr_a)
-    ocr_b = get_backend(settings.ocr_b)
+    ocr = get_backend(settings.ocr_a)
 
     flags: list[ReviewFlag] = []
-    reconciled_pages: list[str] = []
-    verbatim_pages: list[str] = []
+    ocr_pages: list[str] = []
     for n, page_path in enumerate(page_images, 1):
         logger.info("    page %d/%d", n, len(page_images))
         page_img = Image.open(page_path)
         faint = review.assess_image(page_img)
         if faint:
             flags.append(faint)
+        # OCR the RAW page — Apple Vision reads any orientation and a pre-rotated image OCRs worse.
+        with _stage("ocr"):
+            result = ocr.transcribe_page(page_img)
         with _stage("orient"):
-            upright = preprocess.orient_and_deskew(page_img, settings)
-        with _stage("ocr x2"):
-            text_a = ocr_a.transcribe_page(upright).text
-            text_b = ocr_b.transcribe_page(upright).text
-        verbatim_pages.append(text_a)
-        flags.extend(review.assess_ocr(text_a, text_b))
-        with _stage("reconcile"):
-            reconciled = reconcile.reconcile(
-                settings, transcript_a=text_a, transcript_b=text_b, page_image=page_path,
-                label_a=settings.ocr_a, label_b=settings.ocr_b,
-            )
-        unclear = review.assess_unclear(reconciled)
-        if unclear:
-            flags.append(unclear)
-        reconciled_pages.append(reconciled)
+            deg = preprocess.detect_rotation(settings, page_img)
+        # A 180 page is read bottom-to-top; reverse line order so structure gets it forwards.
+        lines = list(reversed(result.lines)) if deg == 180 else result.lines
+        text = "\n".join(ln.text for ln in lines) if lines else result.text
+        ocr_pages.append(text)
+        flags.extend(review.assess_ocr(text))
+        # Persist an upright page for the review pass + Mealie display image (NOT for OCR).
+        preprocess.make_upright(page_img, deg).convert("RGB").save(page_path, "JPEG", quality=92)
 
     with _stage("structure"):
         recipe = structure.structure(
-            settings, reconciled_pages=reconciled_pages, source_pdf=str(job.pdf_path),
-            verbatim="\n\n".join(verbatim_pages),
+            settings, ocr_pages=ocr_pages, source_pdf=str(job.pdf_path),
+            verbatim="\n\n".join(ocr_pages),
         )
     with _stage("enrich"):
         recipe = enrich_mod.enrich(settings, recipe)
+    recipe.page_images = [p.name for p in page_images]
 
     flags.extend(review.assess_structure(recipe))
+    unclear = review.assess_unclear(_recipe_text(recipe))
+    if unclear:
+        flags.append(unclear)
     with _stage("review"):
         confidence, llm_flags = review.llm_review(settings, recipe, page_images)
     flags.extend(llm_flags)
@@ -107,19 +105,27 @@ def extract_recipe(settings: Settings, job: RecipeJob) -> tuple[Recipe, ReviewRe
     if report.uploadable():
         recipe.import_note = review.format_import_note(report)
 
-    _write_outputs(out_dir, recipe, report, reconciled_pages, source_pdf=job.pdf_path)
+    _write_outputs(out_dir, recipe, report, ocr_pages, source_pdf=job.pdf_path)
     return recipe, report
 
 
+def _recipe_text(recipe: Recipe) -> str:
+    """Combined recipe text, for scanning [UNCLEAR] markers the structure stage may have left."""
+    parts = [recipe.name or ""]
+    parts += [i.text for i in recipe.ingredients]
+    parts += [s.text for s in recipe.instructions]
+    return "\n".join(parts)
+
+
 def _write_outputs(
-    out_dir: Path, recipe: Recipe, report: ReviewReport, reconciled_pages: list[str],
+    out_dir: Path, recipe: Recipe, report: ReviewReport, ocr_pages: list[str],
     *, source_pdf: Path,
 ) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "recipe.json").write_text(recipe.model_dump_json(indent=2))
     (out_dir / "recipe.md").write_text(render.recipe_to_markdown(recipe))
     (out_dir / "review.json").write_text(report.model_dump_json(indent=2))
-    (out_dir / "reconciled.txt").write_text("\n\n".join(reconciled_pages))
+    (out_dir / "ocr.txt").write_text("\n\n".join(ocr_pages))
     (out_dir / source_pdf.name).write_bytes(source_pdf.read_bytes())
 
 
