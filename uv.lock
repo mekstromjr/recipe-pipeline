@@ -2038,8 +2038,10 @@ apple = [
     { name = "pyobjc-framework-quartz" },
     { name = "pyobjc-framework-vision" },
 ]
-ml = [
+kraken = [
     { name = "kraken" },
+]
+trocr = [
     { name = "torch" },
     { name = "transformers" },
 ]
@@ -2055,17 +2057,17 @@ requires-dist = [
     { name = "deskew", specifier = ">=1.5.1" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "jiwer", specifier = ">=3.1.0" },
-    { name = "kraken", marker = "extra == 'ml'", specifier = ">=5.3.0" },
+    { name = "kraken", marker = "extra == 'kraken'", specifier = ">=5.3.0" },
     { name = "pillow", specifier = ">=11.1.0" },
     { name = "pydantic", specifier = ">=2.11.0" },
     { name = "pydantic-settings", specifier = ">=2.7.0" },
     { name = "pyobjc-framework-quartz", marker = "extra == 'apple'", specifier = ">=11.0" },
     { name = "pyobjc-framework-vision", marker = "extra == 'apple'", specifier = ">=11.0" },
     { name = "pypdfium2", specifier = ">=4.30.0" },
-    { name = "torch", marker = "extra == 'ml'", specifier = ">=2.6.0" },
-    { name = "transformers", marker = "extra == 'ml'", specifier = ">=4.49.0" },
+    { name = "torch", marker = "extra == 'trocr'", specifier = ">=2.6.0" },
+    { name = "transformers", marker = "extra == 'trocr'", specifier = ">=4.49.0" },
 ]
-provides-extras = ["apple", "ml"]
+provides-extras = ["apple", "trocr", "kraken"]
 
 [package.metadata.requires-dev]
 dev = [
