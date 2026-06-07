@@ -67,10 +67,11 @@ def assess_ocr(text_a: str, text_b: str) -> list[ReviewFlag]:
     if a and b:
         cer = jiwer.cer(a.lower(), b.lower())
         if cer > DIVERGENCE_CER:
+            # Strong cross-engine disagreement is a significant issue -> hold.
             flags.append(
                 ReviewFlag(
                     code="ocr_divergence",
-                    severity="warn",
+                    severity="fail",
                     detail=f"OCR engines disagree strongly (A/B CER={cer:.2f})",
                 )
             )
@@ -153,3 +154,40 @@ def build_report(flags: list[ReviewFlag], *, confidence: float | None = None) ->
     else:
         status = ReviewStatus.OK
     return ReviewReport(status=status, confidence=confidence, flags=flags)
+
+
+# Human-friendly phrasing per flag code (falls back to the raw detail).
+_FRIENDLY = {
+    "unclear_spans": "Some text couldn't be read with full confidence (marked [UNCLEAR]).",
+    "ocr_divergence": "The text-recognition engines disagreed on parts of this scan.",
+    "missing_title": "No clear title was detected.",
+    "missing_steps": "No preparation steps were detected.",
+    "missing_ingredients": "No ingredients were detected.",
+    "faint_scan": "The scan was faint or low-contrast.",
+    "empty_ocr": "Very little text could be read from the scan.",
+    "llm_dubious": "The automated review was not fully confident in this extraction.",
+    "llm_issue": None,  # use the model's own concrete issue text
+}
+
+
+def format_import_note(report: ReviewReport) -> str | None:
+    """Render a recipe's flags into a user-facing 'Import Software Note', or None if clean.
+
+    Goes at the end of the recipe (Mealie note) so anyone cooking from it can see where the
+    automated import was unsure and check the attached original scan.
+    """
+    if not report.flags:
+        return None
+    seen: list[str] = []
+    for flag in report.flags:
+        msg = _FRIENDLY.get(flag.code, flag.detail)
+        if msg is None:  # llm_issue: surface the concrete issue
+            msg = flag.detail
+        if msg not in seen:
+            seen.append(msg)
+    bullets = "\n".join(f"- {m}" for m in seen)
+    return (
+        "This recipe was digitized automatically from the attached scan. The import software "
+        "flagged a few things to double-check against the original:\n"
+        f"{bullets}"
+    )

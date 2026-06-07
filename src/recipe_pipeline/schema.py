@@ -61,6 +61,7 @@ class Recipe(BaseModel):
 
     # --- Provenance / quality bookkeeping (-> Mealie extras) ---
     source: str | None = None  # e.g. "Grandma's recipe box", "newspaper clipping"
+    import_note: str | None = None  # user-facing caveat about pipeline uncertainty (-> Mealie note)
     original_transcription: str | None = None  # verbatim reconciled text, all pages
     unclear_spans: list[str] = Field(default_factory=list)  # things needing human review
     source_curiosities: str | None = None  # quaint off-recipe content (e.g. back of a clipping)
@@ -83,9 +84,9 @@ class Recipe(BaseModel):
 class ReviewStatus(StrEnum):
     """Outcome of the quality gate."""
 
-    OK = "ok"  # clean — eligible for upload
-    NEEDS_REVIEW = "needs_review"  # held: looks dubious, a human should check
-    FAILED = "failed"  # held: hard failure (faint/blank scan, empty OCR) — likely unusable
+    OK = "ok"  # clean — uploads with no note
+    NEEDS_REVIEW = "needs_review"  # minor issues — uploads WITH an Import Software Note
+    FAILED = "failed"  # significant failure (near-unreadable, strong disagreement) — HELD
 
 
 class ReviewFlag(BaseModel):
@@ -104,5 +105,5 @@ class ReviewReport(BaseModel):
     flags: list[ReviewFlag] = Field(default_factory=list)
 
     def uploadable(self) -> bool:
-        """Only clean recipes upload; needs_review and failed are both held back."""
-        return self.status == ReviewStatus.OK
+        """Hold only significant failures; minor issues upload with an Import Software Note."""
+        return self.status != ReviewStatus.FAILED

@@ -26,10 +26,25 @@ def test_build_report_status_levels():
     assert review.build_report(warn + fail).status == ReviewStatus.FAILED
 
 
-def test_only_ok_is_uploadable():
-    assert review.build_report([]).uploadable() is True
+def test_uploadable_holds_only_failures():
+    assert review.build_report([]).uploadable() is True  # OK
+    # Minor issues now UPLOAD (with an Import Software Note), not held.
     warned = review.build_report([ReviewFlag(code="x", severity="warn", detail="d")])
-    assert warned.uploadable() is False
+    assert warned.uploadable() is True
+    # Significant failures are still held.
+    failed = review.build_report([ReviewFlag(code="y", severity="fail", detail="d")])
+    assert failed.uploadable() is False
+
+
+def test_format_import_note():
+    assert review.format_import_note(review.build_report([])) is None
+    rep = review.build_report(
+        [ReviewFlag(code="unclear_spans", severity="warn", detail="1 unresolved")]
+    )
+    note = review.format_import_note(rep)
+    assert note is not None
+    assert "double-check" in note.lower()
+    assert "couldn't be read" in note.lower()  # friendly phrasing, not the raw code
 
 
 def test_assess_structure_flags_missing_parts():

@@ -26,8 +26,9 @@ class Settings(BaseSettings):
     # Reconcile needs a VISION-capable model (must see the page image). gemma4:e4b advertises
     # the `vision` capability; the gemma4 MLX tags are text-only. Verify with `ollama show`.
     reconcile_model: str = "gemma4:e4b"
-    # Enrichment is text-only (dish history/estimates), so it can use a larger text model.
-    enrich_model: str = "gemma4:26b-mlx-32k"
+    # Text-LLM stages (structure, enrich). Defaults to e4b: it honors Ollama JSON-schema output
+    # and is fast. (The gemma4 MLX tags are slow and ignore structured-output format.)
+    enrich_model: str = "gemma4:e4b"
     # Context window per Ollama request. Ollama's default (~4096) silently TRUNCATES longer
     # prompts (dropping the system rules / start of transcripts) — bad for fidelity. A vision
     # request also spends tokens encoding the image, so keep this generous.

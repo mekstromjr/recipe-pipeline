@@ -47,8 +47,13 @@ def _load():
     """Load processor + model once (cached). Heavy: ~1.3 GB download on first call."""
     torch, TrOCRProcessor, VisionEncoderDecoderModel = _import_stack()
     device = _pick_device(torch)
-    processor = TrOCRProcessor.from_pretrained(MODEL_ID)
-    model = VisionEncoderDecoderModel.from_pretrained(MODEL_ID).to(device)
+    # Use the local cache; never hit the network at runtime (download happens on first use only).
+    # Set HF_HUB_OFFLINE=0 / delete the flag to force a fresh download.
+    import os
+
+    offline = os.environ.get("RECIPE_TROCR_ONLINE") != "1"
+    processor = TrOCRProcessor.from_pretrained(MODEL_ID, local_files_only=offline)
+    model = VisionEncoderDecoderModel.from_pretrained(MODEL_ID, local_files_only=offline).to(device)
     model.eval()
     return torch, processor, model, device
 

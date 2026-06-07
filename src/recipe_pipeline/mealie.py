@@ -15,7 +15,8 @@ Recipe-Input field mapping:
     prepTime/cookTime/totalTime/performTime <- string times
     recipeCategory[]     <- [{"name", "slug"} ...]  (meal/course; both required)
     tags[]               <- [{"name", "slug"} ...]  (cuisine/genre; both required)
-    notes[]              <- [{"title", "text"} ...]
+    notes[]              <- [{"title": "Import Software Note", "text": recipe.import_note}]
+                            (only when set — minor-issue recipes carry it; clean ones don't)
     extras               <- {provenance, dish_history, ai_estimated_fields, ocr_confidence,
                              unclear_spans, source_curiosities}   # non-card content lives here
     settings.disableAmount = true  (free-text ingredients)
