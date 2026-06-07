@@ -1,23 +1,25 @@
-"""End-to-end extraction: one recipe PDF -> a reviewed :class:`Recipe` written to ``output/``.
+"""End-to-end extraction: scanned recipe PDFs -> reviewed recipe output under ``output/``.
 
-Orchestration glue. Early stages (discover, render, OCR, reconcile, review signals) are real;
-``structure``/``enrich`` are still stubbed, so running it today exercises the wiring and stops
-at the first unimplemented stage. Quality flags are accumulated throughout and written to a
-``review.json`` that gates upload (flagged recipes are HELD).
-
-Flow:  ingest -> render -> preprocess -> OCR x2 -> reconcile -> structure -> enrich -> review.
+Per-recipe flow:  render -> preprocess -> OCR x2 -> reconcile -> structure -> enrich -> review.
+Significant failures are HELD; minor issues upload with an Import Software Note. No Mealie upload
+(recipes are bulk-imported manually). A run logs per-stage progress to the console and
+``output/run.log`` and writes a summary ``output/_manifest.json``.
 """
 
 from __future__ import annotations
 
+import json
+import logging
+import time
+from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
 from PIL import Image
 
 from recipe_pipeline import enrich as enrich_mod
-from recipe_pipeline import ingest, pdf, preprocess, reconcile, review, structure
+from recipe_pipeline import ingest, pdf, preprocess, reconcile, render, review, structure
 from recipe_pipeline.htr import get_backend
-from recipe_pipeline.schema import ReviewFlag, ReviewStatus
+from recipe_pipeline.schema import ReviewFlag
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -26,60 +28,82 @@ if TYPE_CHECKING:
     from recipe_pipeline.ingest import RecipeJob
     from recipe_pipeline.schema import Recipe, ReviewReport
 
+logger = logging.getLogger("recipe_pipeline")
+
+
+@contextmanager
+def _stage(name: str):
+    """Log a stage's start and elapsed time."""
+    logger.info("    %-12s ...", name)
+    t = time.perf_counter()
+    yield
+    logger.info("    %-12s done (%.1fs)", name, time.perf_counter() - t)
+
+
+def _setup_logging(out_root: Path) -> None:
+    """Log INFO to the console and to output/run.log (idempotent)."""
+    out_root.mkdir(parents=True, exist_ok=True)
+    logger.setLevel(logging.INFO)
+    if any(isinstance(h, logging.FileHandler) for h in logger.handlers):
+        return
+    fmt = logging.Formatter("%(asctime)s %(message)s", datefmt="%H:%M:%S")
+    fh = logging.FileHandler(out_root / "run.log")
+    fh.setFormatter(fmt)
+    sh = logging.StreamHandler()
+    sh.setFormatter(fmt)
+    logger.addHandler(fh)
+    logger.addHandler(sh)
+
 
 def extract_recipe(settings: Settings, job: RecipeJob) -> tuple[Recipe, ReviewReport]:
     """Run the full pipeline for one recipe PDF; return the recipe and its review report."""
     out_dir = settings.outbox / job.slug
-    pages_dir = out_dir / "pages"
-    page_images = pdf.render_pages_to_dir(job.pdf_path, pages_dir)
+    with _stage("render"):
+        page_images = pdf.render_pages_to_dir(job.pdf_path, out_dir / "pages")
 
     ocr_a = get_backend(settings.ocr_a)
     ocr_b = get_backend(settings.ocr_b)
 
     flags: list[ReviewFlag] = []
     reconciled_pages: list[str] = []
-    verbatim_pages: list[str] = []  # faithful primary-OCR text -> original_transcription
-    for page_path in page_images:
+    verbatim_pages: list[str] = []
+    for n, page_path in enumerate(page_images, 1):
+        logger.info("    page %d/%d", n, len(page_images))
         page_img = Image.open(page_path)
-        # Faintness is judged on the raw scan, before any correction.
         faint = review.assess_image(page_img)
         if faint:
             flags.append(faint)
-
-        upright = preprocess.orient_and_deskew(page_img, settings)
-        text_a = ocr_a.transcribe_page(upright).text
-        text_b = ocr_b.transcribe_page(upright).text
+        with _stage("orient"):
+            upright = preprocess.orient_and_deskew(page_img, settings)
+        with _stage("ocr x2"):
+            text_a = ocr_a.transcribe_page(upright).text
+            text_b = ocr_b.transcribe_page(upright).text
         verbatim_pages.append(text_a)
         flags.extend(review.assess_ocr(text_a, text_b))
-
-        reconciled = reconcile.reconcile(
-            settings,
-            transcript_a=text_a,
-            transcript_b=text_b,
-            page_image=page_path,
-            label_a=settings.ocr_a,
-            label_b=settings.ocr_b,
-        )
+        with _stage("reconcile"):
+            reconciled = reconcile.reconcile(
+                settings, transcript_a=text_a, transcript_b=text_b, page_image=page_path,
+                label_a=settings.ocr_a, label_b=settings.ocr_b,
+            )
         unclear = review.assess_unclear(reconciled)
         if unclear:
             flags.append(unclear)
         reconciled_pages.append(reconciled)
 
-    recipe = structure.structure(
-        settings,
-        reconciled_pages=reconciled_pages,
-        source_pdf=str(job.pdf_path),
-        verbatim="\n\n".join(verbatim_pages),
-    )
-    recipe = enrich_mod.enrich(settings, recipe)
+    with _stage("structure"):
+        recipe = structure.structure(
+            settings, reconciled_pages=reconciled_pages, source_pdf=str(job.pdf_path),
+            verbatim="\n\n".join(verbatim_pages),
+        )
+    with _stage("enrich"):
+        recipe = enrich_mod.enrich(settings, recipe)
 
-    # Structure + vision-LLM review.
     flags.extend(review.assess_structure(recipe))
-    confidence, llm_flags = review.llm_review(settings, recipe, page_images)
+    with _stage("review"):
+        confidence, llm_flags = review.llm_review(settings, recipe, page_images)
     flags.extend(llm_flags)
     report = review.build_report(flags, confidence=confidence)
 
-    # Minor issues ride along as a user-facing note (significant failures are held instead).
     if report.uploadable():
         recipe.import_note = review.format_import_note(report)
 
@@ -88,34 +112,60 @@ def extract_recipe(settings: Settings, job: RecipeJob) -> tuple[Recipe, ReviewRe
 
 
 def _write_outputs(
-    out_dir: Path,
-    recipe: Recipe,
-    report: ReviewReport,
-    reconciled_pages: list[str],
-    *,
-    source_pdf: Path,
+    out_dir: Path, recipe: Recipe, report: ReviewReport, reconciled_pages: list[str],
+    *, source_pdf: Path,
 ) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "recipe.json").write_text(recipe.model_dump_json(indent=2))
+    (out_dir / "recipe.md").write_text(render.recipe_to_markdown(recipe))
     (out_dir / "review.json").write_text(report.model_dump_json(indent=2))
     (out_dir / "reconciled.txt").write_text("\n\n".join(reconciled_pages))
-    # Preserve the original scan alongside the outputs.
     (out_dir / source_pdf.name).write_bytes(source_pdf.read_bytes())
 
 
 def extract_all(settings: Settings) -> None:
-    """Process every PDF in the inbox; write each result under ``output/<slug>/`` for review."""
+    """Process every PDF in the inbox; log progress and write output/<slug>/ + a manifest."""
+    _setup_logging(settings.outbox)
     jobs = ingest.discover(settings.inbox)
     if not jobs:
-        print(f"No PDFs found in {settings.inbox}. Drop one scanned PDF per recipe and retry.")
+        logger.info("No PDFs found in %s. Drop a scanned PDF per recipe and retry.", settings.inbox)
         return
-    for job in jobs:
-        print(f"Processing {job.source_name} -> output/{job.slug}/")
-        _, report = extract_recipe(settings, job)
-        if not report.uploadable():
-            note = "  [HELD: significant issues — needs manual review]"
-        elif report.status == ReviewStatus.NEEDS_REVIEW:
-            note = "  [uploads with Import Software Note]"
-        else:
-            note = ""
-        print(f"  status={report.status}{note}")
+
+    logger.info("Starting run: %d recipe(s)", len(jobs))
+    run_start = time.perf_counter()
+    manifest: list[dict] = []
+    for i, job in enumerate(jobs, 1):
+        logger.info("[%d/%d] %s -> output/%s/", i, len(jobs), job.source_name, job.slug)
+        t = time.perf_counter()
+        entry: dict = {"slug": job.slug, "source": job.source_name}
+        try:
+            recipe, report = extract_recipe(settings, job)
+            entry.update(
+                status=str(report.status), confidence=report.confidence,
+                uploadable=report.uploadable(),
+                ingredients=len(recipe.ingredients), steps=len(recipe.instructions),
+                flags=[f.code for f in report.flags],
+            )
+            held = "HELD" if not report.uploadable() else "ok-to-upload"
+            logger.info("  -> %s (%s) %.1fs", report.status, held, time.perf_counter() - t)
+        except Exception as exc:  # noqa: BLE001 - isolate failures so the batch continues
+            entry.update(status="error", error=f"{type(exc).__name__}: {exc}")
+            logger.exception("  -> ERROR on %s: %s", job.source_name, exc)
+        manifest.append(entry)
+
+    (settings.outbox / "_manifest.json").write_text(json.dumps(manifest, indent=2))
+    _log_summary(manifest, time.perf_counter() - run_start)
+
+
+def _log_summary(manifest: list[dict], elapsed: float) -> None:
+    counts: dict[str, int] = {}
+    for e in manifest:
+        counts[e.get("status", "?")] = counts.get(e.get("status", "?"), 0) + 1
+    logger.info("=" * 56)
+    logger.info("Run complete: %d recipe(s) in %.0fs", len(manifest), elapsed)
+    for status, n in sorted(counts.items()):
+        logger.info("  %-13s %d", status, n)
+    held = [e["slug"] for e in manifest if e.get("status") in ("failed", "error")]
+    if held:
+        logger.info("Held / errored (need manual attention): %s", ", ".join(held))
+    logger.info("Manifest: output/_manifest.json")
