@@ -57,22 +57,27 @@ def recipe_to_payload(
     if recipe.import_note:
         notes.append({"title": "Import note", "text": recipe.import_note})
 
+    # Mealie's `extras` column stores flat string values only — stringify lists/numbers.
     extras = {
         "recipe_pipeline": "v1",
         "provenance": "scan",
-        "ai_estimated_fields": recipe.estimated_fields(),
-        "ocr_confidence": recipe.ocr_confidence,
-        "dish_history": recipe.dish_history,
-        "source_curiosities": recipe.source_curiosities,
-        "unclear_spans": recipe.unclear_spans,
-        "original_transcription": recipe.original_transcription,
+        "ai_estimated_fields": ", ".join(recipe.estimated_fields()),
+        "ocr_confidence": "" if recipe.ocr_confidence is None else str(recipe.ocr_confidence),
+        "dish_history": recipe.dish_history or "",
+        "source_curiosities": recipe.source_curiosities or "",
+        "unclear_spans": " | ".join(recipe.unclear_spans),
+        "original_transcription": recipe.original_transcription or "",
     }
 
     body: dict[str, Any] = {
         "name": recipe.name,
         "description": recipe.description or (recipe.dish_history or ""),
         "recipeIngredient": [{"note": i.text, "quantity": 0} for i in recipe.ingredients],
-        "recipeInstructions": [{"text": s.text} for s in recipe.instructions],
+        # Mealie needs the full step shape, not just {text}.
+        "recipeInstructions": [
+            {"text": s.text, "title": "", "summary": "", "ingredientReferences": []}
+            for s in recipe.instructions
+        ],
         "recipeCategory": categories,
         "tags": tags,
         "notes": notes,

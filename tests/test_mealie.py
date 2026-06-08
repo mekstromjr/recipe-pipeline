@@ -21,7 +21,12 @@ def test_recipe_to_payload_shape():
     # free-text ingredients + disableAmount
     assert p["recipeIngredient"] == [{"note": "2 cup crushed pineapple", "quantity": 0}]
     assert p["settings"]["disableAmount"] is True
-    assert p["recipeInstructions"] == [{"text": "Mix and bake."}]
+    # Mealie needs the full step shape (bare {text} 500s server-side)
+    assert p["recipeInstructions"] == [
+        {"text": "Mix and bake.", "title": "", "summary": "", "ingredientReferences": []}
+    ]
+    # extras values must all be strings (Mealie's extras column rejects lists)
+    assert all(isinstance(v, str) for v in p["extras"].values())
     assert p["tags"] == tags
     assert p["recipeYield"] == "4 servings"
     # verbatim transcription preserved in extras, not the canonical fields

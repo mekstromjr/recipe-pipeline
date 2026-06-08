@@ -78,9 +78,11 @@ launchctl load -w ~/Library/LaunchAgents/net.meklab.recipe-pipeline.plist   # ru
 sudo pmset repeat wake MTWRFSU 00:55:00
 ```
 
-`scripts/nightly-batch.sh` runs `extract --limit 50` then `escalate --limit 50` under
-`caffeinate` (no idle-sleep mid-batch); progress logs to `output/nightly.log`. Requires Ollama
-running. Disable with `launchctl unload …` and `sudo pmset repeat cancel`.
+`scripts/nightly-batch.sh` runs `extract --limit 50`, `escalate --limit 50`, then auto-uploads
+the **high-confidence (`ok`) recipes** to Mealie (it starts/stops its own port-forward;
+`needs_review` recipes stay manual). All under `caffeinate` (no idle-sleep mid-batch); progress
+logs to `output/nightly.log`. Requires Ollama running, and (for auto-upload) a Mealie token in
+`.env` + the cluster reachable. Disable with `launchctl unload …` and `sudo pmset repeat cancel`.
 
 **Cloud escalation (hard cursive).** Apple Vision can't reliably read difficult handwriting (and
 a local VLM *fabricates* on it — dangerous). So failed cards escalate to a strong cloud vision
