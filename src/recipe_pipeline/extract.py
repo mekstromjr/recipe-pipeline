@@ -178,7 +178,12 @@ def extract_all(settings: Settings, *, limit: int | None = None, force: bool = F
         return
     logger.info("Starting run: %d of %d recipe(s)", len(jobs), total)
     run_start = time.perf_counter()
-    manifest: list[dict] = []
+    # Accumulate into the existing manifest so it stays cumulative across nightly runs.
+    manifest_path = settings.outbox / "_manifest.json"
+    by_slug: dict[str, dict] = {}
+    if manifest_path.exists():
+        by_slug = {e["slug"]: e for e in json.loads(manifest_path.read_text())}
+    run_entries: list[dict] = []
     for i, job in enumerate(jobs, 1):
         logger.info("[%d/%d] %s -> output/%s/", i, len(jobs), job.source_name, job.slug)
         t = time.perf_counter()
@@ -196,10 +201,11 @@ def extract_all(settings: Settings, *, limit: int | None = None, force: bool = F
         except Exception as exc:  # noqa: BLE001 - isolate failures so the batch continues
             entry.update(status="error", error=f"{type(exc).__name__}: {exc}")
             logger.exception("  -> ERROR on %s: %s", job.source_name, exc)
-        manifest.append(entry)
+        by_slug[job.slug] = entry
+        run_entries.append(entry)
 
-    (settings.outbox / "_manifest.json").write_text(json.dumps(manifest, indent=2))
-    _log_summary(manifest, time.perf_counter() - run_start)
+    manifest_path.write_text(json.dumps(list(by_slug.values()), indent=2))
+    _log_summary(run_entries, time.perf_counter() - run_start)
 
 
 def escalate(settings: Settings, *, limit: int | None = None) -> None:

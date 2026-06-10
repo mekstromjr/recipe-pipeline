@@ -70,7 +70,8 @@ def recipe_to_payload(
     }
 
     body: dict[str, Any] = {
-        "name": recipe.name,
+        # NOTE: no "name" — it's set at create time. Re-sending it on PATCH collides with the
+        # just-created recipe (and with duplicate-named recipes) -> 400 "Recipe already exists".
         "description": recipe.description or (recipe.dish_history or ""),
         "recipeIngredient": [{"note": i.text, "quantity": 0} for i in recipe.ingredients],
         # Mealie needs the full step shape, not just {text}.
@@ -155,7 +156,9 @@ class MealieClient:
             )
         r.raise_for_status()
 
-    def upload(self, recipe: Recipe, *, source_pdf: Path, page_one_image: Path | None) -> str:
+    def upload(
+        self, recipe: Recipe, *, source_pdf: Path | None, page_one_image: Path | None
+    ) -> str:
         """Create + PATCH the recipe, set the image, attach the PDF. Return the new slug."""
         tags = self.ensure_tags([*recipe.tags, *self.settings.group_tag_list])
         categories = self.ensure_categories(recipe.categories)
@@ -163,7 +166,7 @@ class MealieClient:
         self.patch_recipe(slug, recipe_to_payload(recipe, tags=tags, categories=categories))
         if page_one_image and page_one_image.exists():
             self.set_image(slug, page_one_image)
-        if source_pdf.exists():
+        if source_pdf and source_pdf.exists():
             self.add_asset(slug, source_pdf)
         return slug
 
@@ -172,36 +175,44 @@ class MealieClient:
 
 
 def upload_reviewed(settings: Settings, *, include_needs_review: bool = True) -> None:
-    """Batch-upload reviewed recipes (status ok [+ needs_review]) from the manifest to Mealie."""
-    manifest_path = settings.outbox / "_manifest.json"
-    if not manifest_path.exists():
-        logger.info("No manifest at %s — run `extract` first.", manifest_path)
-        return
-    manifest = json.loads(manifest_path.read_text())
+    """Batch-upload reviewed recipes to Mealie.
+
+    Scans the output directories directly (not the per-run manifest, which only holds the last
+    run), so it finds every ``ok``/``needs_review`` recipe accumulated across nights. Each
+    uploaded recipe gets an ``.uploaded`` marker file so re-runs skip it.
+    """
     wanted = {"ok", "needs_review"} if include_needs_review else {"ok"}
-    todo = [e for e in manifest if e.get("status") in wanted and not e.get("uploaded")]
+    todo: list[Path] = []
+    for d in sorted(settings.outbox.iterdir()):
+        if not d.is_dir() or d.name.startswith("_"):
+            continue
+        review = d / "review.json"
+        if not (d / "recipe.json").exists() or not review.exists():
+            continue
+        if (d / ".uploaded").exists():
+            continue
+        if json.loads(review.read_text()).get("status") in wanted:
+            todo.append(d)
+
     if not todo:
         logger.info("Nothing to upload (no un-uploaded %s recipes).", " / ".join(sorted(wanted)))
         return
 
     client = MealieClient(settings)
     logger.info("Uploading %d recipe(s) to %s", len(todo), settings.mealie_url)
-    by_slug = {e["slug"]: e for e in manifest}
     try:
-        for i, e in enumerate(todo, 1):
-            out_dir = settings.outbox / e["slug"]
-            recipe = _load_recipe(out_dir / "recipe.json")
-            page1 = next(iter(sorted((out_dir / "pages").glob("page-*.jpg"))), None)
-            pdf_path = out_dir / e["source"]
+        for i, d in enumerate(todo, 1):
+            recipe = _load_recipe(d / "recipe.json")
+            page1 = next(iter(sorted((d / "pages").glob("page-*.jpg"))), None)
+            pdf_path = next(iter(sorted(d.glob("*.pdf"))), None)
             try:
                 new_slug = client.upload(recipe, source_pdf=pdf_path, page_one_image=page1)
-                by_slug[e["slug"]]["uploaded"] = new_slug
-                logger.info("[%d/%d] %s -> mealie/%s", i, len(todo), e["slug"], new_slug)
+                (d / ".uploaded").write_text(new_slug)
+                logger.info("[%d/%d] %s -> mealie/%s", i, len(todo), d.name, new_slug)
             except Exception as exc:  # noqa: BLE001 - isolate so the batch continues
-                logger.exception("[%d/%d] FAILED %s: %s", i, len(todo), e["slug"], exc)
+                logger.exception("[%d/%d] FAILED %s: %s", i, len(todo), d.name, exc)
     finally:
         client.close()
-    manifest_path.write_text(json.dumps(list(by_slug.values()), indent=2))
     logger.info("Upload complete. Filter in Mealie by tag: %s", ", ".join(settings.group_tag_list))
 
 

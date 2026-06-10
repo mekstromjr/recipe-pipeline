@@ -17,7 +17,8 @@ def test_recipe_to_payload_shape():
     tags = [{"id": "1", "name": "Scan", "slug": "scan"}]
     p = recipe_to_payload(r, tags=tags, categories=[])
 
-    assert p["name"] == "Apple Pie"
+    # name is set at create time, NOT in the PATCH body (re-sending it 400s on duplicates)
+    assert "name" not in p
     # free-text ingredients + disableAmount
     assert p["recipeIngredient"] == [{"note": "2 cup crushed pineapple", "quantity": 0}]
     assert p["settings"]["disableAmount"] is True

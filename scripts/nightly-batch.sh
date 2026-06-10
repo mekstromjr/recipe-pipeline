@@ -10,6 +10,8 @@ set -uo pipefail
 
 REPO="/Users/mekstromjr/Dev/meklab/recipe-pipeline"
 UV="/Users/mekstromjr/.langflow/uv/uv"
+# Absolute paths — launchd runs with a minimal PATH that excludes Homebrew (/opt/homebrew/bin).
+KUBECTL="/opt/homebrew/bin/kubectl"
 BATCH=50
 
 cd "$REPO" || { echo "repo not found: $REPO"; exit 1; }
@@ -30,9 +32,9 @@ caffeinate -i "$UV" run recipe-pipeline escalate --limit "$BATCH"
 # Best-effort: needs a Mealie token in .env + the cluster reachable (Tailscale).
 if grep -qE '^RECIPE_MEALIE_API_TOKEN=.+' .env 2>/dev/null; then
   echo "auto-upload: starting Mealie port-forward"
-  kubectl -n prod port-forward svc/mealie 9000:9000 >/tmp/mealie-pf-nightly.log 2>&1 &
+  "$KUBECTL" -n prod port-forward svc/mealie 9000:9000 >/tmp/mealie-pf-nightly.log 2>&1 &
   PF=$!
-  sleep 6
+  sleep 8
   caffeinate -i "$UV" run recipe-pipeline upload --ok-only || echo "auto-upload step failed (continuing)"
   kill "$PF" 2>/dev/null || true
 else
