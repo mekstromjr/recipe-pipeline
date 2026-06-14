@@ -28,17 +28,4 @@ fi
 caffeinate -i "$UV" run recipe-pipeline extract --limit "$BATCH"
 caffeinate -i "$UV" run recipe-pipeline escalate --limit "$BATCH"
 
-# Auto-upload HIGH-CONFIDENCE (ok) recipes to Mealie. needs_review stays manual.
-# Best-effort: needs a Mealie token in .env + the cluster reachable (Tailscale).
-if grep -qE '^RECIPE_MEALIE_API_TOKEN=.+' .env 2>/dev/null; then
-  echo "auto-upload: starting Mealie port-forward"
-  "$KUBECTL" -n prod port-forward svc/mealie 9000:9000 >/tmp/mealie-pf-nightly.log 2>&1 &
-  PF=$!
-  sleep 8
-  caffeinate -i "$UV" run recipe-pipeline upload --ok-only || echo "auto-upload step failed (continuing)"
-  kill "$PF" 2>/dev/null || true
-else
-  echo "auto-upload: no Mealie token in .env — skipping (run \`upload\` manually)"
-fi
-
 echo "nightly batch DONE  $(date '+%Y-%m-%d %H:%M:%S')"

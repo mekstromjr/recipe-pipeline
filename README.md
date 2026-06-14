@@ -78,11 +78,22 @@ launchctl load -w ~/Library/LaunchAgents/net.meklab.recipe-pipeline.plist   # ru
 sudo pmset repeat wake MTWRFSU 00:55:00
 ```
 
-`scripts/nightly-batch.sh` runs `extract --limit 50`, `escalate --limit 50`, then auto-uploads
-the **high-confidence (`ok`) recipes** to Mealie (it starts/stops its own port-forward;
-`needs_review` recipes stay manual). All under `caffeinate` (no idle-sleep mid-batch); progress
-logs to `output/nightly.log`. Requires Ollama running, and (for auto-upload) a Mealie token in
-`.env` + the cluster reachable. Disable with `launchctl unload …` and `sudo pmset repeat cancel`.
+`scripts/nightly-batch.sh` runs `extract --limit 50` then `escalate --limit 50` under
+`caffeinate` (no idle-sleep mid-batch); progress logs to `output/nightly.log`. Requires Ollama.
+Disable with `launchctl unload …` and `sudo pmset repeat cancel`.
+
+**Upload runs separately, during the day.** The LAN route to the k3s API is unreliable right
+after the overnight sleep/wake (the Mac is dual-homed wired+wireless on the subnet and Tailscale
+also routes it), so uploading at 1am fails. Instead a second agent
+(`net.meklab.recipe-pipeline-upload`, `scripts/upload-batch.sh`) runs at 9/12/15/18/21h: it
+checks the cluster is reachable, and if so uploads the **high-confidence (`ok`)** recipes
+(`needs_review` stays manual). It's a clean no-op when unreachable, and idempotent (per-recipe
+`.uploaded` markers), so the backlog self-heals on whichever slot the route is healthy.
+
+```bash
+cp scripts/net.meklab.recipe-pipeline-upload.plist ~/Library/LaunchAgents/
+launchctl load -w ~/Library/LaunchAgents/net.meklab.recipe-pipeline-upload.plist
+```
 
 **Cloud escalation (hard cursive).** Apple Vision can't reliably read difficult handwriting (and
 a local VLM *fabricates* on it — dangerous). So failed cards escalate to a strong cloud vision
