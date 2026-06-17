@@ -24,7 +24,9 @@ if TYPE_CHECKING:
 class StructuredCard(BaseModel):
     """Flat shape the LLM fills (constrained via Ollama JSON-schema output)."""
 
-    name: str
+    # Defaulted (was required): the model sometimes returns null `name` (e.g. a page with no
+    # clear title), which crashed validation and put the recipe in a nightly retry loop.
+    name: str = ""
     description: str | None = None
     ingredients: list[str] = Field(default_factory=list)
     instructions: list[str] = Field(default_factory=list)
@@ -63,10 +65,21 @@ def structure(
         model=settings.enrich_model,  # text model
         format=StructuredCard.model_json_schema(),
     )
-    card = StructuredCard.model_validate_json(_json_only(reply))
+    try:
+        card = StructuredCard.model_validate_json(_json_only(reply))
+    except Exception:
+        # Malformed model output must not crash the batch (it would retry forever). Fall back to
+        # an empty card; the review gate then flags it (missing ingredients/title) for review.
+        card = StructuredCard()
+
+    # A page with no readable title still gets a usable name (the gate flags it for review).
+    name = card.name.strip() if card.name else ""
+    if not name:
+        first = next((ln.strip() for ln in ocr_text.splitlines() if ln.strip()), "")
+        name = (first[:60] or "Untitled (needs review)")
 
     return Recipe(
-        name=card.name,
+        name=name,
         description=card.description,
         ingredients=[Ingredient(text=t) for t in card.ingredients],
         instructions=[Step(text=t) for t in card.instructions],
