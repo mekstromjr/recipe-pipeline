@@ -60,8 +60,8 @@ uv run recipe-pipeline extract            # all of inbox/ -> reviewed output/<sl
 uv run recipe-pipeline extract --limit 20 # sample batch (process 20 new recipes)
 uv run recipe-pipeline extract --force    # reprocess everything (default: skip already-done)
 uv run recipe-pipeline escalate           # re-OCR the FAILED tail with cloud vision (hard cursive)
-# ...review output/<slug>/recipe.md + output/_manifest.json...
-# then bulk-import the OK recipes to Mealie (manual)
+uv run recipe-pipeline review             # local UI: work the needs_review queue (scan + edit + approve)
+# ...then upload (ok recipes auto-upload; needs_review upload once approved in the review UI)
 ```
 
 ### Nightly batches (avoid one 12-hour run)

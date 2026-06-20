@@ -181,7 +181,6 @@ def upload_reviewed(settings: Settings, *, include_needs_review: bool = True) ->
     run), so it finds every ``ok``/``needs_review`` recipe accumulated across nights. Each
     uploaded recipe gets an ``.uploaded`` marker file so re-runs skip it.
     """
-    wanted = {"ok", "needs_review"} if include_needs_review else {"ok"}
     todo: list[Path] = []
     for d in sorted(settings.outbox.iterdir()):
         if not d.is_dir() or d.name.startswith("_"):
@@ -189,13 +188,18 @@ def upload_reviewed(settings: Settings, *, include_needs_review: bool = True) ->
         review = d / "review.json"
         if not (d / "recipe.json").exists() or not review.exists():
             continue
-        if (d / ".uploaded").exists():
-            continue
-        if json.loads(review.read_text()).get("status") in wanted:
+        if (d / ".uploaded").exists() or (d / ".rejected").exists():
+            continue  # already uploaded, or skipped in review
+        status = json.loads(review.read_text()).get("status")
+        if status == "ok":
+            todo.append(d)
+        elif status == "needs_review" and include_needs_review and (d / ".reviewed").exists():
+            # needs_review uploads only after a human approves it in the review UI
             todo.append(d)
 
     if not todo:
-        logger.info("Nothing to upload (no un-uploaded %s recipes).", " / ".join(sorted(wanted)))
+        scope = "ok + approved needs_review" if include_needs_review else "ok"
+        logger.info("Nothing to upload (no un-uploaded %s recipes).", scope)
         return
 
     client = MealieClient(settings)

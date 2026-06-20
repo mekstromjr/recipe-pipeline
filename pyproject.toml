@@ -46,3 +46,7 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+
+[tool.ruff.lint.per-file-ignores]
+# review_server.py embeds an HTML/CSS/JS string with intentionally long lines.
+"src/recipe_pipeline/review_server.py" = ["E501"]

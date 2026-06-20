@@ -39,8 +39,14 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p_escalate.set_defaults(func=_cmd_escalate)
 
+    p_review = sub.add_parser(
+        "review", help="Open the local review UI to work through the needs_review queue."
+    )
+    p_review.add_argument("--port", type=int, default=8765, help="Port for the review server.")
+    p_review.set_defaults(func=_cmd_review)
+
     p_upload = sub.add_parser(
-        "upload", help="Batch-upload reviewed recipes (ok + needs_review) to Mealie."
+        "upload", help="Batch-upload reviewed recipes (ok + approved needs_review) to Mealie."
     )
     p_upload.add_argument(
         "--ok-only", action="store_true", help="Upload only `ok` recipes (skip needs_review)."
@@ -64,6 +70,13 @@ def _cmd_extract(args: argparse.Namespace) -> int:
     from recipe_pipeline import extract
 
     extract.extract_all(load_settings(), limit=args.limit, force=args.force)
+    return 0
+
+
+def _cmd_review(args: argparse.Namespace) -> int:
+    from recipe_pipeline import review_server
+
+    review_server.serve(load_settings(), port=args.port)
     return 0
 
 
