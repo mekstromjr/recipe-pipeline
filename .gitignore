@@ -8,13 +8,17 @@ __pycache__/
 .pytest_cache/
 
 # Pipeline data — scans, rendered pages, and outputs are local only (not versioned).
-# Keep the directories (via .gitkeep) but ignore their contents.
+# Keep the root directories (via .gitkeep) but ignore their contents, and ignore these
+# data/log dirs wherever they appear (e.g. worker/output/ when the worker runs from worker/).
 inbox/*
 !inbox/.gitkeep
 output/*
 !output/.gitkeep
 samples/*
 !samples/.gitkeep
+**/output/
+**/inbox/
+*.log
 
 # Model / HF caches that may land in-tree
 .cache/
