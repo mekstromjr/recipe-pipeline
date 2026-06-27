@@ -26,12 +26,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import httpx
-
-from recipe_pipeline.ingest import slugify
+from recipe_pipeline_shared.slug import slugify
 
 if TYPE_CHECKING:
+    from recipe_pipeline_shared.schema import Recipe
+
     from recipe_pipeline.config import Settings
-    from recipe_pipeline.schema import Recipe
 
 logger = logging.getLogger("recipe_pipeline")
 
@@ -221,6 +221,6 @@ def upload_reviewed(settings: Settings, *, include_needs_review: bool = True) ->
 
 
 def _load_recipe(path: Path) -> Recipe:
-    from recipe_pipeline.schema import Recipe
+    from recipe_pipeline_shared.schema import Recipe
 
     return Recipe.model_validate_json(path.read_text())

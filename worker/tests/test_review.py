@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from recipe_pipeline import review
-from recipe_pipeline.schema import Ingredient, Recipe, ReviewFlag, ReviewStatus, Step
+from recipe_pipeline_shared.schema import Ingredient, Recipe, ReviewFlag, ReviewStatus, Step
 
 
 def _recipe(**kw) -> Recipe:

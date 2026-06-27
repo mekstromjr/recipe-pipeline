@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
-import re
-import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
+
+# slugify now lives in the shared package (worker + server both need it); re-exported here
+# so existing `from recipe_pipeline.ingest import slugify` call sites keep working.
+from recipe_pipeline_shared.slug import slugify
+
+__all__ = ["RecipeJob", "discover", "slugify"]
 
 
 @dataclass(frozen=True)
@@ -18,14 +22,6 @@ class RecipeJob:
     @property
     def source_name(self) -> str:
         return self.pdf_path.name
-
-
-def slugify(value: str) -> str:
-    """ASCII, lowercase, hyphen-separated slug (matches the style Mealie uses for recipe slugs)."""
-    value = unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode("ascii")
-    value = re.sub(r"[^\w\s-]", "", value).strip().lower()
-    value = re.sub(r"[\s_-]+", "-", value)
-    return value or "recipe"
 
 
 def discover(inbox: Path) -> list[RecipeJob]:

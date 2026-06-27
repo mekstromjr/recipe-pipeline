@@ -77,7 +77,7 @@ def _recipe(slug: str) -> dict:
 
 def _save(slug: str, body: dict) -> None:
     """Apply edits to recipe.json, preserving everything we don't expose for editing."""
-    from recipe_pipeline.schema import Ingredient, Recipe, Step
+    from recipe_pipeline_shared.schema import Ingredient, Recipe, Step
 
     d = _OUTBOX / slug
     recipe = Recipe.model_validate_json((d / "recipe.json").read_text())

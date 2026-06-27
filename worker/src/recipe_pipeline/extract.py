@@ -15,18 +15,19 @@ from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
 from PIL import Image
+from recipe_pipeline_shared.schema import ReviewFlag
 
 from recipe_pipeline import enrich as enrich_mod
 from recipe_pipeline import ingest, pdf, preprocess, render, review, structure
 from recipe_pipeline.htr import get_backend
-from recipe_pipeline.schema import ReviewFlag
 
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from recipe_pipeline_shared.schema import Recipe, ReviewReport
+
     from recipe_pipeline.config import Settings
     from recipe_pipeline.ingest import RecipeJob
-    from recipe_pipeline.schema import Recipe, ReviewReport
 
 logger = logging.getLogger("recipe_pipeline")
 

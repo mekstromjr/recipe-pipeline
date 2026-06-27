@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from recipe_pipeline.schema import Field_, Recipe
+    from recipe_pipeline_shared.schema import Field_, Recipe
 
 
 def _timing(label: str, field: Field_) -> str | None:

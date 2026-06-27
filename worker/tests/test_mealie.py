@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from recipe_pipeline.mealie import recipe_to_payload
-from recipe_pipeline.schema import Field_, Ingredient, Provenance, Recipe, Step
+from recipe_pipeline_shared.schema import Field_, Ingredient, Provenance, Recipe, Step
 
 
 def test_recipe_to_payload_shape():

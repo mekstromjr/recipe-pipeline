@@ -2,6 +2,19 @@ version = 1
 revision = 2
 requires-python = ">=3.12"
 
+[manifest]
+members = [
+    "recipe-pipeline-server",
+    "recipe-pipeline-shared",
+    "recipe-pipeline-worker",
+]
+
+[manifest.dependency-groups]
+dev = [
+    { name = "pytest", specifier = ">=8.3.0" },
+    { name = "ruff", specifier = ">=0.9.0" },
+]
+
 [[package]]
 name = "annotated-types"
 version = "0.7.0"
@@ -640,9 +653,31 @@ wheels = [
 ]
 
 [[package]]
-name = "recipe-pipeline"
+name = "recipe-pipeline-server"
 version = "0.1.0"
-source = { editable = "." }
+source = { editable = "server" }
+dependencies = [
+    { name = "recipe-pipeline-shared" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "recipe-pipeline-shared", editable = "shared" }]
+
+[[package]]
+name = "recipe-pipeline-shared"
+version = "0.1.0"
+source = { editable = "shared" }
+dependencies = [
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "pydantic", specifier = ">=2.11.0" }]
+
+[[package]]
+name = "recipe-pipeline-worker"
+version = "0.1.0"
+source = { editable = "worker" }
 dependencies = [
     { name = "deskew" },
     { name = "httpx" },
@@ -651,18 +686,13 @@ dependencies = [
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "pypdfium2" },
+    { name = "recipe-pipeline-shared" },
 ]
 
 [package.optional-dependencies]
 apple = [
     { name = "pyobjc-framework-quartz" },
     { name = "pyobjc-framework-vision" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "pytest" },
-    { name = "ruff" },
 ]
 
 [package.metadata]
@@ -676,14 +706,9 @@ requires-dist = [
     { name = "pyobjc-framework-quartz", marker = "extra == 'apple'", specifier = ">=11.0" },
     { name = "pyobjc-framework-vision", marker = "extra == 'apple'", specifier = ">=11.0" },
     { name = "pypdfium2", specifier = ">=4.30.0" },
+    { name = "recipe-pipeline-shared", editable = "shared" },
 ]
 provides-extras = ["apple"]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "pytest", specifier = ">=8.3.0" },
-    { name = "ruff", specifier = ">=0.9.0" },
-]
 
 [[package]]
 name = "ruff"

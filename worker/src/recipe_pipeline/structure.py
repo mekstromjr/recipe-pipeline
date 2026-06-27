@@ -1,4 +1,4 @@
-"""Turn the OCR transcription into a structured :class:`~recipe_pipeline.schema.Recipe`.
+"""Turn the OCR transcription into a structured :class:`~recipe_pipeline_shared.schema.Recipe`.
 
 Also applies the relevance filter for newspaper clippings (see prompts.STRUCTURE_SYSTEM_PROMPT):
 recipe content only; keep+[UNCLEAR] when unsure rather than silently dropping; quaint off-recipe
@@ -12,10 +12,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
+from recipe_pipeline_shared.schema import Field_, Ingredient, Provenance, Recipe, Step
 
 from recipe_pipeline import ollama_client
 from recipe_pipeline.prompts import STRUCTURE_SYSTEM_PROMPT
-from recipe_pipeline.schema import Field_, Ingredient, Provenance, Recipe, Step
 
 if TYPE_CHECKING:
     from recipe_pipeline.config import Settings

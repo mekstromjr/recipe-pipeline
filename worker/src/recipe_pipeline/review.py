@@ -17,16 +17,16 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
+from recipe_pipeline_shared.schema import ReviewFlag, ReviewReport, ReviewStatus
 
 from recipe_pipeline import ollama_client
 from recipe_pipeline.prompts import REVIEW_SYSTEM_PROMPT
-from recipe_pipeline.schema import ReviewFlag, ReviewReport, ReviewStatus
 
 if TYPE_CHECKING:
     from PIL import Image
+    from recipe_pipeline_shared.schema import Recipe
 
     from recipe_pipeline.config import Settings
-    from recipe_pipeline.schema import Recipe
 
 # Tunable thresholds (validated empirically against real scans).
 FAINT_DARK_FRACTION = 0.004  # <0.4% truly-dark pixels => near-blank/too faint

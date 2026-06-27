@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from recipe_pipeline.enrich import _set_if_empty
-from recipe_pipeline.schema import Field_, Provenance
 from recipe_pipeline.structure import _json_only
+from recipe_pipeline_shared.schema import Field_, Provenance
 
 
 def test_estimate_fills_only_empty_fields():

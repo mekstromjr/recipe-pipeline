@@ -128,20 +128,31 @@ API token gives clean API access. SearXNG's JSON API needs the same port-forward
 
 ## Layout
 
+Restructured into a **uv workspace** (recipe-pipeline #2): the worker (MacBook OCR) and the
+server (k8s control plane) share one `Recipe` model via `shared/`, so they can never drift.
+`uv sync` builds all three members into one dev venv; the server image (#12) builds only the
+server member, so it never pulls the worker's Apple Vision deps. Full design: repo wiki
+`architecture/recipe-service` (milestone *meklab: Recipe Service*).
+
 | Path | Role |
 |---|---|
-| `src/recipe_pipeline/config.py` | settings (pydantic-settings, `RECIPE_` env prefix) |
-| `src/recipe_pipeline/schema.py` | internal `Recipe` model + per-field provenance + review report |
-| `src/recipe_pipeline/prompts.py` | structure/review system prompts incl. relevance rules |
-| `src/recipe_pipeline/pdf.py` | render PDF pages → images (pypdfium2) |
-| `src/recipe_pipeline/ingest.py` | discover `inbox/*.pdf` → jobs |
-| `src/recipe_pipeline/preprocess.py` | orientation detection + upright image (for review/display) |
-| `src/recipe_pipeline/htr/` | OCR backends: `applevision` (local) + `openrouter` (cloud escalation) |
-| `src/recipe_pipeline/structure.py` | OCR text → recipe fields + relevance filter |
-| `src/recipe_pipeline/enrich.py` | SearXNG-backed additive metadata enrichment |
-| `src/recipe_pipeline/review.py` | quality gate (faint/empty/[UNCLEAR]/structure/LLM review) |
-| `src/recipe_pipeline/mealie.py` | Mealie API client (verified mapping; manual bulk import) |
-| `src/recipe_pipeline/render.py` | recipe → markdown for human review |
-| `src/recipe_pipeline/bakeoff.py` | CER/WER OCR comparison harness |
-| `src/recipe_pipeline/extract.py` | end-to-end batch orchestration (resumable; manifest) |
-| `src/recipe_pipeline/cli.py` | `extract` / `upload` / `bakeoff` commands |
+| `shared/` (`recipe-pipeline-shared`) | the Recipe model + slug — imported by worker AND server |
+| `shared/src/recipe_pipeline_shared/schema.py` | `Recipe` model + per-field provenance + review report |
+| `shared/src/recipe_pipeline_shared/slug.py` | `slugify` (job slugs + Mealie organizer slugs) |
+| `worker/` (`recipe-pipeline-worker`) | the MacBook OCR pipeline + the `recipe-pipeline` CLI |
+| `worker/src/recipe_pipeline/config.py` | settings (pydantic-settings, `RECIPE_` env prefix) |
+| `worker/src/recipe_pipeline/prompts.py` | structure/review system prompts incl. relevance rules |
+| `worker/src/recipe_pipeline/pdf.py` | render PDF pages → images (pypdfium2) |
+| `worker/src/recipe_pipeline/ingest.py` | discover `inbox/*.pdf` → jobs |
+| `worker/src/recipe_pipeline/preprocess.py` | orientation detection + upright image (for review/display) |
+| `worker/src/recipe_pipeline/htr/` | OCR backends: `applevision` (local) + `openrouter` (cloud escalation) |
+| `worker/src/recipe_pipeline/structure.py` | OCR text → recipe fields + relevance filter |
+| `worker/src/recipe_pipeline/enrich.py` | SearXNG-backed additive metadata enrichment |
+| `worker/src/recipe_pipeline/review.py` | quality gate (faint/empty/[UNCLEAR]/structure/LLM review) |
+| `worker/src/recipe_pipeline/render.py` | recipe → markdown for human review |
+| `worker/src/recipe_pipeline/bakeoff.py` | CER/WER OCR comparison harness |
+| `worker/src/recipe_pipeline/extract.py` | end-to-end batch orchestration (resumable; manifest) |
+| `worker/src/recipe_pipeline/review_server.py` | current local review UI (superseded by the hosted server in #9) |
+| `worker/src/recipe_pipeline/mealie.py` | Mealie API client (migrates server-side in #7) |
+| `worker/src/recipe_pipeline/cli.py` | `extract` / `escalate` / `review` / `upload` / `bakeoff` commands |
+| `server/` (`recipe-pipeline-server`) | FastAPI control plane (scaffold; built in #4–#8) — NO Apple Vision deps |

@@ -13,13 +13,14 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel
+from recipe_pipeline_shared.schema import Field_, Provenance
 
 from recipe_pipeline import ollama_client, searxng_client
-from recipe_pipeline.schema import Field_, Provenance
 
 if TYPE_CHECKING:
+    from recipe_pipeline_shared.schema import Recipe
+
     from recipe_pipeline.config import Settings
-    from recipe_pipeline.schema import Recipe
 
 ENRICH_SYSTEM_PROMPT = """\
 You add background metadata to a recipe. You are given the dish name and some web search
