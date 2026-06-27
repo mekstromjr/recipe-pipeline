@@ -3,10 +3,13 @@ name = "recipe-pipeline-server"
 version = "0.1.0"
 description = "Recipe service control plane (FastAPI, k8s). Scaffold — APIs built in recipe-pipeline #4-#8."
 requires-python = ">=3.12"
-# Intentionally minimal for now; FastAPI/SQLAlchemy/S3 deps land with the skeleton (#4).
+# FastAPI/uvicorn/boto3 land with the skeleton (#4); #3 adds the persistence layer.
 # NEVER add Apple Vision / pyobjc here — the server does not OCR.
 dependencies = [
     "recipe-pipeline-shared",
+    "sqlalchemy>=2.0.36",
+    "alembic>=1.14.0",
+    "psycopg[binary]>=3.2.3",
 ]
 
 [build-system]

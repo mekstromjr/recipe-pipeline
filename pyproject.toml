@@ -12,8 +12,8 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["worker/tests"]
-pythonpath = ["worker/src", "shared/src"]
+testpaths = ["shared/tests", "worker/tests", "server/tests"]
+pythonpath = ["shared/src", "worker/src", "server/src"]
 
 [tool.ruff]
 line-length = 100
