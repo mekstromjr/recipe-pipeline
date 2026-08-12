@@ -7,8 +7,10 @@ from pathlib import Path
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# Project root = two levels up from this file (src/recipe_pipeline/config.py -> project root).
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+# Repo root = three levels up from this file (worker/src/recipe_pipeline/config.py -> repo
+# root). The batch data dirs (inbox/, output/, samples/) live at the REPO root, not worker/ —
+# the #2 restructure moved this file a level deeper and parents[2] silently became worker/.
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 
 class Settings(BaseSettings):
