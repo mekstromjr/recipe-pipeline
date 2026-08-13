@@ -13,8 +13,13 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Response
+from fastapi.responses import FileResponse
 from sqlalchemy import text
 
+# Module-level import: `from __future__ import annotations` makes hints strings, and FastAPI
+# resolves them against module globals — a function-local import silently degrades UserDep
+# to an unannotated (query!) parameter.
+from recipe_pipeline_server.api.deps import UserDep
 from recipe_pipeline_server.config import Settings, load_settings
 from recipe_pipeline_server.db.session import make_engine, make_sessionmaker
 from recipe_pipeline_server.storage import Storage
@@ -66,6 +71,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     from recipe_pipeline_server.api.review import router as review_router
 
     app.include_router(review_router)
+
+    index = Path(__file__).resolve().parent / "web" / "index.html"
+
+    @app.get("/", include_in_schema=False)
+    async def root() -> FileResponse:
+        return FileResponse(index)
+
+    @app.get("/api/me")
+    async def me(user: UserDep) -> dict:
+        """Who forward-auth says we are (shown in the UI, used for audit stamps)."""
+        return {"user": user}
 
     @app.get("/healthz")
     async def healthz() -> dict:

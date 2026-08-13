@@ -194,6 +194,12 @@ async def approve(
     session: AsyncSession = SessionDep,
 ) -> JobDTO:
     job = await _get_job(session, job_id)
+    # Build the client BEFORE transitioning: a misconfigured Mealie must not strand the
+    # job in `approved` (which only transitions onward to uploaded/failed).
+    try:
+        client: MealieClient = request.app.state.mealie_client_factory()
+    except MealieError as exc:
+        raise HTTPException(503, str(exc)) from exc
     _transition(job, JobStatus.APPROVED)
     job.reviewed_by = user
     await session.commit()
@@ -208,7 +214,6 @@ async def approve(
         elif asset.kind == "page" and asset.s3_key.endswith("page-1.jpg"):
             page1 = await asyncio.to_thread(storage.get_bytes, asset.s3_key)
 
-    client: MealieClient = request.app.state.mealie_client_factory()
     try:
         slug = await client.upload(recipe, source=source, page_one_image=page1)
     except MealieError as exc:
