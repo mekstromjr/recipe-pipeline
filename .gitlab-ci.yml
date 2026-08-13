@@ -1,0 +1,75 @@
+# recipe-pipeline CI
+#
+# Stages:
+#   - test:  Secret Detection + server/shared unit tests (worker is macOS-only — pyobjc
+#            can't install on the linux runner, so its tests run on the laptop instead)
+#   - build: Kaniko → registry.meklab.net/$CI_PROJECT_PATH (the SERVER image; see Dockerfile)
+#
+# Image tags produced:
+#   - :<short-sha>  always
+#   - :latest       on main
+#   - :<tag>        on semver git tag push (vX.Y.Z) — what the k8s Deployment pins
+#
+# NOTE: GitLab's integrated registry namespaces images by PROJECT path, so the image is
+# registry.meklab.net/meklab/recipe-pipeline (not .../recipe-service).
+
+stages:
+  - test
+  - build
+
+include:
+  - template: Security/Secret-Detection.gitlab-ci.yml
+
+variables:
+  REGISTRY: registry.meklab.net
+  IMAGE_PATH: $CI_PROJECT_PATH
+
+secret_detection:
+  stage: test
+  rules:
+    - if: $CI_COMMIT_BRANCH || $CI_COMMIT_TAG
+      when: always
+
+test:server:
+  stage: test
+  image: ghcr.io/astral-sh/uv:0.7.17-python3.12-bookworm-slim
+  tags:
+    - meklab-k3s
+  script:
+    - uv sync --frozen --package recipe-pipeline-server
+    - uv run --no-sync pytest shared/tests server/tests -q
+  rules:
+    - if: $CI_COMMIT_BRANCH || $CI_COMMIT_TAG
+      when: always
+
+build:image:
+  stage: build
+  image:
+    name: gcr.io/kaniko-project/executor:v1.23.2-debug
+    entrypoint: [""]
+  tags:
+    - meklab-k3s
+  script:
+    - |
+      DEST_ARGS="--destination=${REGISTRY}/${IMAGE_PATH}:${CI_COMMIT_SHORT_SHA}"
+      if [ "$CI_COMMIT_BRANCH" = "main" ]; then
+        DEST_ARGS="$DEST_ARGS --destination=${REGISTRY}/${IMAGE_PATH}:latest"
+      fi
+      if [ -n "$CI_COMMIT_TAG" ]; then
+        DEST_ARGS="$DEST_ARGS --destination=${REGISTRY}/${IMAGE_PATH}:${CI_COMMIT_TAG}"
+      fi
+    - |
+      /kaniko/executor \
+        --context "${CI_PROJECT_DIR}" \
+        --dockerfile "${CI_PROJECT_DIR}/Dockerfile" \
+        --cache=true \
+        --cache-repo="${REGISTRY}/${IMAGE_PATH}/cache" \
+        --snapshot-mode=redo \
+        --use-new-run \
+        $DEST_ARGS
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+$/
+      when: always
+    - if: $CI_COMMIT_BRANCH == "main"
+      when: always
+    - when: never
