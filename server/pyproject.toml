@@ -1,15 +1,19 @@
 [project]
 name = "recipe-pipeline-server"
 version = "0.1.0"
-description = "Recipe service control plane (FastAPI, k8s). Scaffold — APIs built in recipe-pipeline #4-#8."
+description = "Recipe service control plane (FastAPI, k8s)."
 requires-python = ">=3.12"
-# FastAPI/uvicorn/boto3 land with the skeleton (#4); #3 adds the persistence layer.
 # NEVER add Apple Vision / pyobjc here — the server does not OCR.
 dependencies = [
     "recipe-pipeline-shared",
-    "sqlalchemy>=2.0.36",
+    "sqlalchemy[asyncio]>=2.0.36",
     "alembic>=1.14.0",
     "psycopg[binary]>=3.2.3",
+    "fastapi>=0.115.0",
+    "uvicorn>=0.32.0",
+    "pydantic-settings>=2.7.0",
+    "boto3>=1.35.0",
+    "httpx>=0.28.0",
 ]
 
 [build-system]
