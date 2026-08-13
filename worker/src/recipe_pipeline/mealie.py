@@ -23,9 +23,10 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import httpx
+from recipe_pipeline_shared.mealie_payload import recipe_to_payload
 from recipe_pipeline_shared.slug import slugify
 
 if TYPE_CHECKING:
@@ -34,61 +35,6 @@ if TYPE_CHECKING:
     from recipe_pipeline.config import Settings
 
 logger = logging.getLogger("recipe_pipeline")
-
-
-def _times(recipe: Recipe) -> dict[str, Any]:
-    out: dict[str, Any] = {}
-    pairs = (("prep_time", "prepTime"), ("cook_time", "cookTime"), ("total_time", "totalTime"))
-    for our, mealie in pairs:
-        f = getattr(recipe, our)
-        if f.value:
-            out[mealie] = f.value
-    return out
-
-
-def recipe_to_payload(
-    recipe: Recipe, *, tags: list[dict], categories: list[dict]
-) -> dict[str, Any]:
-    """Map our :class:`Recipe` to a Mealie ``Recipe-Input`` PATCH body. ``tags``/``categories``
-    are pre-resolved Mealie organizer objects ({id,name,slug})."""
-    notes = []
-    if recipe.source:
-        notes.append({"title": "Source", "text": recipe.source})
-    if recipe.import_note:
-        notes.append({"title": "Import note", "text": recipe.import_note})
-
-    # Mealie's `extras` column stores flat string values only — stringify lists/numbers.
-    extras = {
-        "recipe_pipeline": "v1",
-        "provenance": "scan",
-        "ai_estimated_fields": ", ".join(recipe.estimated_fields()),
-        "ocr_confidence": "" if recipe.ocr_confidence is None else str(recipe.ocr_confidence),
-        "dish_history": recipe.dish_history or "",
-        "source_curiosities": recipe.source_curiosities or "",
-        "unclear_spans": " | ".join(recipe.unclear_spans),
-        "original_transcription": recipe.original_transcription or "",
-    }
-
-    body: dict[str, Any] = {
-        # NOTE: no "name" — it's set at create time. Re-sending it on PATCH collides with the
-        # just-created recipe (and with duplicate-named recipes) -> 400 "Recipe already exists".
-        "description": recipe.description or (recipe.dish_history or ""),
-        "recipeIngredient": [{"note": i.text, "quantity": 0} for i in recipe.ingredients],
-        # Mealie needs the full step shape, not just {text}.
-        "recipeInstructions": [
-            {"text": s.text, "title": "", "summary": "", "ingredientReferences": []}
-            for s in recipe.instructions
-        ],
-        "recipeCategory": categories,
-        "tags": tags,
-        "notes": notes,
-        "extras": {k: v for k, v in extras.items() if v not in (None, [], "")},
-        "settings": {"disableAmount": True},
-        **_times(recipe),
-    }
-    if recipe.recipe_yield.value:
-        body["recipeYield"] = recipe.recipe_yield.value
-    return body
 
 
 class MealieClient:

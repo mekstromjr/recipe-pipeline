@@ -34,7 +34,10 @@ def run_migrations(settings: Settings) -> None:
     from alembic.config import Config as AlembicConfig
 
     cfg = AlembicConfig(str(ALEMBIC_INI))
-    # migrations/env.py reads RECIPE_DB_URL; strip the async marker — alembic runs sync.
+    # script_location in the ini is CWD-relative; pin it beside the ini so migrations run
+    # no matter where the process was started (uvicorn in the container, pytest at repo root).
+    cfg.set_main_option("script_location", str(ALEMBIC_INI.parent / "migrations"))
+    # migrations/env.py reads RECIPE_DB_URL.
     os.environ["RECIPE_DB_URL"] = settings.db_url
     command.upgrade(cfg, "head")
 
@@ -51,10 +54,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.engine = make_engine(settings.db_url)
         app.state.sessionmaker = make_sessionmaker(app.state.engine)
         app.state.storage = Storage(settings)
+        # Indirection so tests can swap in a transport-mocked client.
+        from recipe_pipeline_server.mealie import MealieClient
+
+        app.state.mealie_client_factory = lambda: MealieClient(settings)
         yield
         await app.state.engine.dispose()
 
     app = FastAPI(title="recipe-service", lifespan=lifespan)
+
+    from recipe_pipeline_server.api.review import router as review_router
+
+    app.include_router(review_router)
 
     @app.get("/healthz")
     async def healthz() -> dict:

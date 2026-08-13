@@ -74,6 +74,9 @@ class Job(Base):
     uploaded_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
     reviewed_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
+    # Set when injection into Mealie succeeds; also the #14 backfill dedup key.
+    mealie_slug: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -101,6 +104,9 @@ class RecipeRow(Base):
         UUID(as_uuid=True), ForeignKey("jobs.id", ondelete="CASCADE"), primary_key=True
     )
     data: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    # The worker's ReviewReport (status/confidence/flags) as dumped JSON — kept separate from
+    # the Recipe itself so the canonical recipe stays exactly what goes to Mealie.
+    review: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
