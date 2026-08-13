@@ -1,0 +1,11 @@
+# Build context hygiene: none of this belongs in the image (and output/ is huge locally).
+.git
+.venv
+output/
+inbox/
+samples/
+worker/output/
+.pytest_cache
+.ruff_cache
+**/__pycache__
+.env
