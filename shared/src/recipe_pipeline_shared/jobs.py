@@ -114,5 +114,6 @@ class Job(BaseModel):
     lease_expires_at: datetime | None = None
     uploaded_by: str | None = None
     reviewed_by: str | None = None
+    mealie_slug: str | None = None
     created_at: datetime
     updated_at: datetime
