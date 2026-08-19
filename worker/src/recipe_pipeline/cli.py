@@ -65,8 +65,8 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p_bakeoff.add_argument(
         "--backends",
-        default="applevision",
-        help="Comma-separated backend names to compare (default: applevision).",
+        default="glmocr",
+        help="Comma-separated backend names to compare (default: glmocr).",
     )
     p_bakeoff.set_defaults(func=_cmd_bakeoff)
 

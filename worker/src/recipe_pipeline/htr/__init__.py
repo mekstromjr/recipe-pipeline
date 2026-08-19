@@ -1,5 +1,5 @@
-"""Pluggable OCR/HTR backends. Apple Vision is the production engine; the interface stays
-pluggable for future engines."""
+"""Pluggable OCR/HTR backends. glm-ocr (on <pve-host>) is the production engine; the interface
+stays pluggable for future engines."""
 
 from recipe_pipeline.htr.base import (
     HTRBackend,

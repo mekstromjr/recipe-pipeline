@@ -69,7 +69,7 @@ def structure(
             settings,
             system=STRUCTURE_SYSTEM_PROMPT,
             user=f"OCR transcription (all pages):\n\n{ocr_text}{user_suffix}",
-            model=settings.enrich_model,  # text model
+            model=settings.text_model,
             format=fmt,
         )
         try:

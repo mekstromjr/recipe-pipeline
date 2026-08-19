@@ -17,13 +17,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
+from PIL import Image
 from recipe_pipeline_shared.schema import ReviewFlag, ReviewReport, ReviewStatus
 
 from recipe_pipeline import ollama_client
+from recipe_pipeline.htr import glmocr
 from recipe_pipeline.prompts import REVIEW_SYSTEM_PROMPT
 
 if TYPE_CHECKING:
-    from PIL import Image
     from recipe_pipeline_shared.schema import Recipe
 
     from recipe_pipeline.config import Settings
@@ -91,12 +92,18 @@ def llm_review(
 ) -> tuple[float, list[ReviewFlag]]:
     """Vision-LLM review: compare the recipe to the image, return (confidence, flags)."""
     recipe_text = recipe.model_dump_json(indent=2)
+    # Downscale before sending: the vision encoder's cost scales with pixel count, and a
+    # full-resolution scan buys no accuracy at this model size.
+    images = [
+        glmocr.downscale(Image.open(p).convert("RGB"), settings.ocr_max_edge)
+        for p in page_images
+    ]
     reply = ollama_client.chat(
         settings,
         system=REVIEW_SYSTEM_PROMPT,
         user=f"Structured recipe:\n{recipe_text}\n\nReview it against the page image(s).",
-        images=page_images,
-        model=settings.vision_model,
+        images=images,
+        model=settings.text_model,
     )
     data = _parse_json(reply)
     confidence = float(data.get("confidence", 0.0))

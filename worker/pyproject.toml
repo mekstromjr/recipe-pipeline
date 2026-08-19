@@ -1,7 +1,7 @@
 [project]
 name = "recipe-pipeline-worker"
 version = "0.1.0"
-description = "MacBook worker: render PDF -> Apple Vision OCR -> orient -> structure -> enrich -> review."
+description = "Worker: render PDF -> glm-ocr (<pve-host>) -> structure -> enrich -> review."
 requires-python = ">=3.12"
 dependencies = [
     "recipe-pipeline-shared",
@@ -12,13 +12,6 @@ dependencies = [
     "pypdfium2>=4.30.0",
     "deskew>=1.5.1",
     "jiwer>=3.1.0",
-]
-
-[project.optional-dependencies]
-# Apple Vision OCR backend (on-device, macOS only) — the production OCR engine.
-apple = [
-    "pyobjc-framework-Vision>=11.0",
-    "pyobjc-framework-Quartz>=11.0",
 ]
 
 [project.scripts]

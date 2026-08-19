@@ -64,7 +64,7 @@ def enrich(settings: Settings, recipe: Recipe) -> Recipe:
             settings,
             system=ENRICH_SYSTEM_PROMPT,
             user=f"Dish name: {recipe.name}\n\nWeb snippets:\n{snippets}",
-            model=settings.enrich_model,
+            model=settings.text_model,
             format=Enrichment.model_json_schema(),
         )
         data = Enrichment.model_validate_json(_json_only(reply))
