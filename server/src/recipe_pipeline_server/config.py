@@ -24,6 +24,13 @@ class Settings(BaseSettings):
     db_url: str = "postgresql+psycopg://recipes:recipes@localhost:5432/recipes"
     # Run `alembic upgrade head` during startup. Disabled in tests.
     run_migrations: bool = True
+    # Hard ceiling on a single Postgres connect attempt (psycopg connect_timeout) and on
+    # waiting for a pooled connection. Without these a wedged network path stalls a request
+    # indefinitely instead of failing fast.
+    db_connect_timeout: int = 5
+    db_pool_timeout: int = 5
+    # Absolute wall-clock budget for ONE dependency check on /statusz.
+    dep_check_timeout: float = 5.0
 
     # --- Garage S3 (`recipes` bucket; path-style, region `meklab`) ---
     s3_endpoint: str = "http://garage-s3.infra.svc.cluster.local:3900"

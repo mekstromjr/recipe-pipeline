@@ -56,14 +56,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             logger.info("running migrations")
             await asyncio.to_thread(run_migrations, settings)
         app.state.settings = settings
-        app.state.engine = make_engine(settings.db_url)
+        app.state.engine = make_engine(
+            settings.db_url,
+            connect_timeout=settings.db_connect_timeout,
+            pool_timeout=settings.db_pool_timeout,
+        )
         app.state.sessionmaker = make_sessionmaker(app.state.engine)
         app.state.storage = Storage(settings)
         # Indirection so tests can swap in a transport-mocked client.
         from recipe_pipeline_server.mealie import MealieClient
 
         app.state.mealie_client_factory = lambda: MealieClient(settings)
+        app.state.serving = True
         yield
+        # Flip first so in-flight readiness probes see "draining" during graceful shutdown.
+        app.state.serving = False
         await app.state.engine.dispose()
 
     app = FastAPI(title="recipe-service", lifespan=lifespan)
@@ -83,24 +90,56 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         """Who forward-auth says we are (shown in the UI, used for audit stamps)."""
         return {"user": user}
 
+    async def _check_db() -> None:
+        async with app.state.engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
+
+    async def _check_s3() -> None:
+        await asyncio.to_thread(app.state.storage.check)
+
+    async def _dependency_checks() -> dict[str, str]:
+        """Probe each backing store under an absolute time budget.
+
+        ``wait_for`` is the outer guard: the per-client timeouts (psycopg connect_timeout,
+        botocore connect/read) bound individual syscalls, but a pool checkout or a retry
+        chain can still stack them. This caps the whole check either way.
+        """
+        checks: dict[str, str] = {}
+        for name, check in (("db", _check_db), ("s3", _check_s3)):
+            try:
+                await asyncio.wait_for(check(), timeout=settings.dep_check_timeout)
+                checks[name] = "ok"
+            except TimeoutError:
+                checks[name] = f"error: timeout after {settings.dep_check_timeout}s"
+            except Exception as exc:
+                checks[name] = f"error: {exc.__class__.__name__}"
+        return checks
+
     @app.get("/healthz")
     async def healthz() -> dict:
+        """Liveness: the process is up. Never touches a dependency — a restart cannot fix
+        a sick database, so a failing dependency must not trigger one."""
         return {"status": "ok"}
 
     @app.get("/readyz")
     async def readyz(response: Response) -> dict:
-        checks: dict[str, str] = {}
-        try:
-            async with app.state.engine.connect() as conn:
-                await conn.execute(text("SELECT 1"))
-            checks["db"] = "ok"
-        except Exception as exc:  # pragma: no cover - message shape only
-            checks["db"] = f"error: {exc.__class__.__name__}"
-        try:
-            await asyncio.to_thread(app.state.storage.check)
-            checks["s3"] = "ok"
-        except Exception as exc:
-            checks["s3"] = f"error: {exc.__class__.__name__}"
+        """Readiness: can THIS pod serve traffic?
+
+        Deliberately does NOT probe Postgres or Garage. Readiness gates Service endpoint
+        membership, which is only useful when there is another replica to route to; with a
+        single replica, failing readiness on a briefly-slow dependency removes the only
+        backend and turns a degraded dependency into a hard 503 at the ingress. Dependency
+        health is reported by /statusz, for monitoring rather than for traffic gating.
+        """
+        if not getattr(app.state, "serving", False):
+            response.status_code = 503
+            return {"status": "draining"}
+        return {"status": "ok"}
+
+    @app.get("/statusz")
+    async def statusz(response: Response) -> dict:
+        """Deep dependency check for monitoring/blackbox. NOT wired to a kubelet probe."""
+        checks = await _dependency_checks()
         if any(v != "ok" for v in checks.values()):
             response.status_code = 503
         return checks

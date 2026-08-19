@@ -19,8 +19,21 @@ from sqlalchemy.ext.asyncio import (
 )
 
 
-def make_engine(db_url: str) -> AsyncEngine:
-    return create_async_engine(db_url, pool_pre_ping=True)
+def make_engine(
+    db_url: str, *, connect_timeout: int = 5, pool_timeout: int = 5
+) -> AsyncEngine:
+    """Engine with every wait bounded.
+
+    ``connect_timeout`` (psycopg) caps a single TCP+auth attempt; ``pool_timeout`` caps how
+    long a request waits for a free pooled connection. Both default to hard ceilings so a
+    slow or blackholed database surfaces as a prompt error rather than a hung request.
+    """
+    return create_async_engine(
+        db_url,
+        pool_pre_ping=True,
+        pool_timeout=pool_timeout,
+        connect_args={"connect_timeout": connect_timeout},
+    )
 
 
 def make_sessionmaker(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
