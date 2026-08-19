@@ -75,6 +75,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app = FastAPI(title="recipe-service", lifespan=lifespan)
 
+    @app.middleware("http")
+    async def cache_headers(request, call_next):
+        """Browsers heuristically cache header-less GETs (Safari especially): a PATCHed
+        recipe could re-render from stale cached JSON. Page images ARE immutable per job,
+        so they get the opposite treatment."""
+        response = await call_next(request)
+        if request.url.path.startswith("/api"):
+            if "/pages/" in request.url.path and response.status_code == 200:
+                response.headers["Cache-Control"] = "private, max-age=86400, immutable"
+            else:
+                response.headers["Cache-Control"] = "no-store"
+        return response
+
+    # The worker ingress path (/api/worker, no forward-auth) gets a monitorable root +
+    # ping: external uptime checks were 404ing against it, and #7's worker loop will use
+    # ping as its connectivity self-test.
+    @app.get("/api/worker")
+    @app.get("/api/worker/ping")
+    async def worker_ping() -> dict:
+        return {"status": "ok"}
+
     from recipe_pipeline_server.api.review import router as review_router
 
     app.include_router(review_router)

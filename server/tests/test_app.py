@@ -79,3 +79,21 @@ def test_settings_env_override(monkeypatch):
     s = Settings(_env_file=None)
     assert s.db_url.endswith("example:5432/recipes")
     assert s.group_tag_list == ["A", "B", "C"]
+
+
+def test_worker_ping_is_open_and_monitorable():
+    """/api/worker root + ping answer 200 (external uptime checks were 404ing on the
+    keyless worker ingress before any worker endpoints existed)."""
+    with TestClient(create_app(_test_settings())) as client:
+        assert client.get("/api/worker").json() == {"status": "ok"}
+        assert client.get("/api/worker/ping").json() == {"status": "ok"}
+
+
+def test_api_json_is_never_cached():
+    """no-store on API JSON: Safari's heuristic caching served stale recipe JSON after a
+    PATCH, which read as 'my saved changes are gone'."""
+    with TestClient(create_app(_test_settings())) as client:
+        r = client.get("/api/me", headers={"X-Authentik-Username": "m"})
+        assert r.headers["Cache-Control"] == "no-store"
+        # error responses too — a cached 401/404 would be just as sticky
+        assert client.get("/api/me").headers["Cache-Control"] == "no-store"
