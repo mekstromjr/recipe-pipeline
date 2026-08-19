@@ -172,6 +172,9 @@ def test_page_image_served(env):
     assert r.status_code == 200
     assert r.headers["content-type"] == "image/jpeg"
     assert r.content.startswith(b"\xff\xd8")
+    # page images are immutable per job -> long-cache, unlike API JSON (no-store)
+    assert "immutable" in r.headers["Cache-Control"]
+    assert client.get(f"/api/recipes/{jid}").headers["Cache-Control"] == "no-store"
 
 
 def test_approve_injects_and_uploads(env):
