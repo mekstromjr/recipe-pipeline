@@ -77,6 +77,11 @@ class Job(Base):
     # Set when injection into Mealie succeeds; also the #14 backfill dedup key.
     mealie_slug: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
+    # sha256 of the uploaded source file (#6): re-uploading the same scan (or the same
+    # ZIP twice) is reported as a duplicate instead of minting duplicate jobs. Nullable —
+    # backfilled jobs predate it.
+    source_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

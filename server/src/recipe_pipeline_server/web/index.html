@@ -45,6 +45,16 @@
   #empty{margin:auto;color:var(--mut);text-align:center;padding:40px}
   #err{position:fixed;left:50%;transform:translateX(-50%);bottom:16px;background:#3a2520;color:#e6a79e;
        border:1px solid var(--rej);border-radius:8px;padding:10px 16px;display:none;max-width:90%;z-index:10}
+  /* upload view */
+  #upload{flex:1;overflow:auto;padding:20px;display:none;max-width:640px}
+  #drop{border:2px dashed var(--line);border-radius:10px;padding:28px;text-align:center}
+  #drop.hover{border-color:var(--acc);background:#1a2231}
+  #upresults{margin-top:14px}
+  .up{display:flex;gap:10px;padding:6px 4px;border-bottom:1px solid var(--line);font-size:13px}
+  .up .st{flex:0 0 90px;font-weight:600}
+  .up .st.queued{color:var(--ok)} .up .st.duplicate{color:var(--warn)} .up .st.error{color:var(--rej)}
+  .up .fn{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .up .dt{color:var(--mut)}
   /* status view */
   #status{flex:1;overflow:auto;padding:20px;display:none}
   #status h2{font-size:15px;margin:18px 0 8px}
@@ -67,7 +77,7 @@
 </style></head>
 <body>
   <div id="side">
-    <h1>Needs review <a href="#" onclick="toggleStatus(event)">status</a></h1>
+    <h1>Needs review <span><a href="#" onclick="toggleUpload(event)">upload</a> &middot; <a href="#" onclick="toggleStatus(event)">status</a></span></h1>
     <div id="who"></div><div id="prog"></div><div id="list"></div>
   </div>
   <div id="main">
@@ -78,6 +88,18 @@
     <div id="edit"></div>
   </div>
   <div id="status"></div>
+  <div id="upload">
+    <div id="drop">
+      <p><strong>Add recipe scans to the pipeline</strong></p>
+      <p class="hint">PDFs, photos (JPEG/PNG/HEIC), or a ZIP of them. Drop files here or</p>
+      <button class="save" onclick="document.getElementById('picker').click()">Choose files</button>
+      <input id="picker" type="file" multiple accept=".pdf,.jpg,.jpeg,.png,.heic,.zip"
+             style="display:none" onchange="uploadFiles(this.files); this.value=''">
+      <p class="hint">Uploads wait in the processing queue until the scanner worker digitizes
+        them; they appear here for review after that.</p>
+    </div>
+    <div id="upresults"></div>
+  </div>
   <div id="err"></div>
 <script>
 let Q=[], cur=-1, busy=false;
@@ -229,7 +251,8 @@ function esc(s){return (s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>'
 
 async function toggleStatus(ev){ ev.preventDefault();
   const st=$('#status'), main=$('#main');
-  if(st.style.display==='block'){ st.style.display='none'; main.style.display='flex'; return; }
+  if(st.style.display==='block'){ showReview(); return; }
+  $('#upload').style.display='none';
   let s;
   try{ s=await jfetch('/api/status'); }catch(e){ err('Could not load status: '+e.message); return; }
   const order=['needs_review','queued','processing','uploaded','rejected','failed','approved'];
@@ -240,7 +263,31 @@ async function toggleStatus(ev){ ev.preventDefault();
        <td>${new Date(r.at).toLocaleString()}</td><td>${esc(r.mealie_slug||'')}</td></tr>`).join('')+'</table>';
   main.style.display='none'; st.style.display='block';
 }
-function showReview(){ $('#status').style.display='none'; $('#main').style.display='flex'; }
+function showReview(){ $('#status').style.display='none'; $('#upload').style.display='none'; $('#main').style.display='flex'; }
+function toggleUpload(ev){ ev.preventDefault();
+  const up=$('#upload');
+  if(up.style.display==='block'){ showReview(); return; }
+  $('#status').style.display='none'; $('#main').style.display='none'; up.style.display='block';
+}
+async function uploadFiles(files){
+  if(!files||!files.length) return;
+  const fd=new FormData();
+  for(const f of files) fd.append('files', f);
+  const res=$('#upresults');
+  res.innerHTML='<div class="hint">Uploading '+files.length+' file(s)…</div>';
+  let out;
+  try{ out=await jfetch('/api/uploads',{method:'POST',body:fd}); }
+  catch(e){ res.innerHTML=''; err('Upload failed: '+e.message); return; }
+  res.innerHTML=out.results.map(r=>`<div class="up"><span class="st ${r.status}">${r.status}</span>
+    <span class="fn">${esc(r.filename)}</span><span class="dt">${esc(r.detail||'')}</span></div>`).join('');
+  const q=out.results.filter(r=>r.status==='queued').length;
+  if(q) res.innerHTML+=`<div class="hint" style="margin-top:8px">${q} file(s) queued for the pipeline.</div>`;
+}
+(function(){ const d=document.getElementById('drop'); if(!d) return;
+  ['dragover','dragenter'].forEach(ev=>d.addEventListener(ev,e=>{e.preventDefault();d.classList.add('hover');}));
+  ['dragleave','drop'].forEach(ev=>d.addEventListener(ev,e=>{e.preventDefault();d.classList.remove('hover');}));
+  d.addEventListener('drop',e=>uploadFiles(e.dataTransfer.files));
+})();
 
 window.addEventListener('beforeunload', e=>{ if(dirty){ e.preventDefault(); e.returnValue=''; } });
 document.addEventListener('keydown',e=>{ if(e.target.tagName==='TEXTAREA'||e.target.tagName==='INPUT'){
