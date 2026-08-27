@@ -25,9 +25,10 @@ class Settings(BaseSettings):
 
     # --- Models: CPU Ollama on <pve-host> (<ct>), NOT this Mac ---
     # The worker runs in-cluster and reaches <pve-host> over the LAN, same as scribe. Ollama ships
-    # no authentication, so port 11434 is restricted to the k3s nodes by a DOCKER-USER rule —
-    # a laptop CANNOT reach it directly. For local development, tunnel and override:
-    #   ssh -N -L 11500:<lan-ip>:11434 root@<lan-ip>
+    # no authentication, so port 11434 is restricted to the three k3s nodes by iptables INPUT
+    # rules inside the CT — a laptop CANNOT reach it, and neither can the <pve-host> host itself.
+    # For local development, tunnel THROUGH A K3S NODE and override:
+    #   ssh -N -L 11500:<lan-ip>:11434 mekadmin@<lan-ip>
     #   RECIPE_OLLAMA_HOST=http://127.0.0.1:11500 uv run recipe-pipeline extract
     # Do NOT tunnel to local port 11434: a dev Mac running its own native ollama binds IPv4
     # 127.0.0.1 while the forward binds IPv6 [::1], so "localhost:11434" resolves to either
@@ -48,8 +49,11 @@ class Settings(BaseSettings):
     # pool from HOST core count and ignores the container's cgroup quota, so it oversubscribes
     # and the threads fight CFS throttling. Pinning to the real limit measured +73% generation.
     # There is no server-side env var — it is a per-request option, so EVERY call must send it.
-    # <pve-host> is an i5-8500T: 6 physical cores.
-    num_thread: int = 6
+    # <ct> has cores=3 on <pve-host> (i7-7700T, 4c/8t). 3 rather than 4 is MEASURED: num_thread=4
+    # at cores=4 was SLOWER (277.2s vs 266.8s on the same chunk), because <pve-host>'s four distinct
+    # physical cores are CPUs 0-3 — giving all four to the CT leaves the host only SMT siblings
+    # sharing execution units with saturated cores.
+    num_thread: int = 3
 
     # Longest-edge cap for page images sent to the vision model. Full-resolution renders cost
     # real CPU in the vision encoder for no accuracy gain at this model size.
@@ -60,15 +64,22 @@ class Settings(BaseSettings):
     # generous while still bounding a degenerate generation.
     ocr_num_predict: int = 2048
 
-    # Per-request ceiling. CPU OCR is ~20-60s/page and varies with node contention, so this is
-    # a runaway backstop, not an expected duration.
+    # Per-request ceiling. <pve-host> is roughly half <pve-host>'s throughput and cold model load off
+    # its HDD is 39-41s, so a first request after a model swap is slow by design. This is a
+    # runaway backstop, not an expected duration.
     ollama_timeout_seconds: float = 900.0
 
-    # Context window per request. Must match OLLAMA_CONTEXT_LENGTH on <pve-host> (32768). Ollama
-    # truncates over-length input SILENTLY, dropping system rules or the start of transcripts.
-    # Set explicitly rather than inherited, so a change to <pve-host>'s compose cannot silently
-    # alter results here.
-    ollama_num_ctx: int = 32768
+    # Context window per request. Must match OLLAMA_CONTEXT_LENGTH on <pve-host> (16384).
+    #
+    # DO NOT RAISE THIS ALONE. The window and the container memory cap are sized TOGETHER: a
+    # near-full 32k window peaked at 5.9G resident and OOM-killed the server inside <ct>'s
+    # 6G cap (2026-08-26). KV cache scales with tokens actually in the window, so a
+    # short-prompt memory measurement does NOT validate a full-window call. Raising this
+    # requires raising the CT memory cap in the same change.
+    #
+    # Ollama truncates over-length input SILENTLY, dropping system rules or the start of a
+    # transcript, so it is set explicitly rather than inherited from the server default.
+    ollama_num_ctx: int = 16384
 
     # --- Metadata enrichment via SearXNG (port-forward svc/searxng; JSON API) ---
     searxng_url: str = "http://localhost:8888"
