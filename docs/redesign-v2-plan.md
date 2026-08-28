@@ -5,7 +5,7 @@ Status: APPROVED-PENDING (Q1-Q3 answered). Supersedes the Mac-bound v1 flow.
 ## Goal
 
 Free the Mac and simplify. All inference moves to the CPU Ollama on **<pve-host>**
-(`http://ollama.meklab.net:11434`, <ct>). Apple Vision is removed; **glm-ocr** becomes the
+(`http://ollama.meklab.net:11434`, <ct> on **<pve-host>**). Apple Vision is removed; **glm-ocr** becomes the
 OCR engine and **qwen3.5:4b** does structuring and QA. Speed is explicitly not a constraint.
 
 ## Decisions taken
@@ -103,6 +103,55 @@ longer applies since <pve-host> is not a k8s Service. Use an SSH tunnel on **loc
 ```bash
 ssh -N -L 11500:<lan-ip>:11434 root@<lan-ip>
 ```
+
+## Host contention with scribe — MEASURED, and it changes step 6
+
+recipe-pipeline and scribe share one CPU-bound host with `OLLAMA_MAX_LOADED_MODELS=1`,
+`OLLAMA_NUM_PARALLEL=1`, and models on a 42,191-hour HDD. Ollama therefore **serializes every
+request across both services**.
+
+Measured 2026-08-27/28 while scribe was mid-job on a 1.5-hour map-reduce over a logic textbook
+(chunks every 8-12 min, continuous 23:05 -> 00:29+):
+
+| Condition | OCR, one page |
+|---|---|
+| scribe idle | **56.9s** |
+| scribe mid-job | **445s, 484s, 497s, 550s, 558s, 754s, 839s** |
+
+Three consecutive calls showed no warm speedup, because the time is not OCR — it is queueing
+behind scribe's in-flight map chunk, plus a glm-ocr <-> qwen3.5 swap each way off the HDD.
+
+### What was ruled out
+
+* **Not `num_thread`.** Two independent A/B runs disagreed on direction (6 faster in one, 3
+  faster in the other) while returning byte-identical output. Ordering that does not survive
+  repetition means the variable under test is not the driver.
+* **Not swap thrash.** `vmstat` shows `si/so = 0`; the 2.7 GB in swap is stale from an earlier
+  incident. llama-server sits at ~3 cores, exactly its `cores=3` cap.
+* **Not memory pressure from this pipeline.** llama-server RSS 4.2 GB matches the documented
+  resident size. (<pve-host> also runs a Firefox kiosk at ~1.7 GB — expected; it is the console node.)
+
+### Consequence
+
+The ollama README states the swap cost "is bounded" because *scribe's text-layer-first design
+makes OCR the rare path*. **A recipe batch breaks that assumption** — it makes OCR the dominant
+path, holding glm-ocr resident for hours and charging scribe a 39-41s cold load per chunk. The
+interference runs both ways and neither service knows the other exists.
+
+So step 6 ("batch by stage") is necessary but NOT sufficient: it fixes self-inflicted swapping,
+not cross-service swapping. Options, preferred first:
+
+1. **Serialize against scribe** — run batches only when scribe is idle, or take a shared lock.
+   Cheap, no infra change, and fits "speed is not a constraint".
+2. **Accept it** — batches simply run 8-14x slower whenever scribe is busy. Viable, but the
+   numbers belong in the README so it is not a surprise later.
+3. **Raise `OLLAMA_MAX_LOADED_MODELS` to 2** — NOT recommended. Explicitly ruled out by the
+   ollama README; it caused the 2026-08-19 <k3s-server> outage, and <pve-host> has less headroom
+   than <pve-host> did.
+
+**Benchmark hygiene**: check `kubectl -n infra logs deploy/scribe --tail=5` and
+`pct exec <ctid> -- ollama ps` before timing anything on this host. A number taken during a scribe
+job is meaningless.
 
 ## Acceptance check
 
