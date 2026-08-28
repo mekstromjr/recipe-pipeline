@@ -45,8 +45,12 @@ class Settings(BaseSettings):
     # Fixed tags applied to every injected recipe (filterable batch in Mealie).
     group_tags: str = "a family member,Scan,recipe-pipeline-v1"
 
-    # --- Worker API (#7; the ONE credential the MacBook worker holds) ---
+    # --- Worker API (#7; the ONE credential the worker holds) ---
     worker_api_key: str | None = None
+    # Visibility timeout: a claimed job not finished by then returns to `queued` (swept
+    # lazily on the next claim). Sized ~10x a typical extraction so a slow cold model
+    # load doesn't cause double-processing.
+    worker_lease_seconds: int = 1800
 
     @property
     def group_tag_list(self) -> list[str]:

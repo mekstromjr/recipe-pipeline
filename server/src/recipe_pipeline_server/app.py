@@ -98,9 +98,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     from recipe_pipeline_server.api.review import router as review_router
     from recipe_pipeline_server.api.uploads import router as uploads_router
+    from recipe_pipeline_server.api.worker import router as worker_router
 
     app.include_router(review_router)
     app.include_router(uploads_router)
+    app.include_router(worker_router)
 
     index = Path(__file__).resolve().parent / "web" / "index.html"
 
