@@ -53,6 +53,13 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p_upload.set_defaults(func=_cmd_upload)
 
+    p_work = sub.add_parser(
+        "work", help="Pull loop: claim jobs from the recipe service, extract, submit (#10)."
+    )
+    p_work.add_argument("--once", action="store_true", help="Process at most one job, then exit.")
+    p_work.add_argument("--ocr-backend", default=None, help="Override the OCR engine.")
+    p_work.set_defaults(func=_cmd_work)
+
     p_bakeoff = sub.add_parser(
         "bakeoff", help="Score OCR backends on samples/ (CER/WER) to pick the engine pair."
     )
@@ -92,6 +99,14 @@ def _cmd_upload(args: argparse.Namespace) -> int:
 
     extract._setup_logging(load_settings().outbox)  # console + run.log
     mealie.upload_reviewed(load_settings(), include_needs_review=not args.ok_only)
+    return 0
+
+
+def _cmd_work(args: argparse.Namespace) -> int:
+    from recipe_pipeline.config import load_settings
+    from recipe_pipeline.pull import PullConfig, run
+
+    run(load_settings(), PullConfig.from_env(), once=args.once, ocr_backend=args.ocr_backend)
     return 0
 
 
