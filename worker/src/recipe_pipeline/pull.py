@@ -160,6 +160,10 @@ def run(
     ocr_backend: str | None = None,
     transport: httpx.BaseTransport | None = None,
 ) -> None:
+    if not logging.getLogger().handlers:
+        logging.basicConfig(
+            level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
+        )
     http = _make_client(cfg, transport)
     logger.info("worker %s polling %s every %ds (window=%s)",
                 cfg.worker, cfg.server_url, cfg.poll_seconds, cfg.hours or "always")

@@ -49,6 +49,11 @@ def _json_only(text: str) -> str:
     return s[start : end + 1] if start != -1 and end != -1 else s
 
 
+def _degenerate(card: StructuredCard) -> bool:
+    """An 'answer' with no name, ingredients, or steps is no answer at all."""
+    return not card.name and not card.ingredients and not card.instructions
+
+
 def structure(
     settings: Settings,
     *,
@@ -58,18 +63,30 @@ def structure(
 ) -> Recipe:
     """Build a :class:`Recipe` from the per-page OCR text (concatenated into one recipe)."""
     ocr_text = "\n\n".join(ocr_pages)
-    reply = ollama_client.chat(
-        settings,
-        system=STRUCTURE_SYSTEM_PROMPT,
-        user=f"OCR transcription (all pages):\n\n{ocr_text}",
-        model=settings.enrich_model,  # text model
-        format=StructuredCard.model_json_schema(),
-    )
-    try:
-        card = StructuredCard.model_validate_json(_json_only(reply))
-    except Exception:
-        # Malformed model output must not crash the batch (it would retry forever). Fall back to
-        # an empty card; the review gate then flags it (missing ingredients/title) for review.
+
+    def _ask(fmt) -> StructuredCard | None:
+        reply = ollama_client.chat(
+            settings,
+            system=STRUCTURE_SYSTEM_PROMPT,
+            user=f"OCR transcription (all pages):\n\n{ocr_text}",
+            model=settings.enrich_model,  # text model
+            format=fmt,
+        )
+        try:
+            return StructuredCard.model_validate_json(_json_only(reply))
+        except Exception:
+            # Malformed model output must not crash the batch (it would retry forever).
+            return None
+
+    card = _ask(StructuredCard.model_json_schema())
+    if (card is None or _degenerate(card)) and ocr_text.strip():
+        # Schema-constrained decode can COLLAPSE to `{}` on some Ollama/model pairings
+        # (observed: Ollama 0.32.14 + gemma4:e4b returns a bare empty object while the
+        # UNCONSTRAINED reply is a perfect answer). Retry once free-form; `{}` is valid
+        # JSON so this can't be caught as a parse error — it must be caught as emptiness.
+        card = _ask(None) or card
+    if card is None:
+        # Fall back to an empty card; the review gate flags it (missing ingredients/title).
         card = StructuredCard()
 
     # A page with no readable title still gets a usable name (the gate flags it for review).
