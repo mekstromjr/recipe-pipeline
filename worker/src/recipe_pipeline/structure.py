@@ -64,11 +64,11 @@ def structure(
     """Build a :class:`Recipe` from the per-page OCR text (concatenated into one recipe)."""
     ocr_text = "\n\n".join(ocr_pages)
 
-    def _ask(fmt) -> StructuredCard | None:
+    def _ask(fmt, user_suffix: str = "") -> StructuredCard | None:
         reply = ollama_client.chat(
             settings,
             system=STRUCTURE_SYSTEM_PROMPT,
-            user=f"OCR transcription (all pages):\n\n{ocr_text}",
+            user=f"OCR transcription (all pages):\n\n{ocr_text}{user_suffix}",
             model=settings.enrich_model,  # text model
             format=fmt,
         )
@@ -84,7 +84,18 @@ def structure(
         # (observed: Ollama 0.32.14 + gemma4:e4b returns a bare empty object while the
         # UNCONSTRAINED reply is a perfect answer). Retry once free-form; `{}` is valid
         # JSON so this can't be caught as a parse error — it must be caught as emptiness.
-        card = _ask(None) or card
+        # Unconstrained, the model invents its own keys ("title", nested objects...), so
+        # the retry prompt pins the EXACT flat shape it must produce.
+        keys = (
+            'Respond with ONLY a JSON object using exactly these keys: "name" (string), '
+            '"description" (string or null), "ingredients" (array of strings), '
+            '"instructions" (array of strings), "servings", "recipe_yield", "prep_time", '
+            '"cook_time", "total_time", "source_curiosities" (each string or null). '
+            "No markdown fence, no prose."
+        )
+        retry = _ask(None, user_suffix=f"\n\n{keys}")
+        if retry is not None and not _degenerate(retry):
+            card = retry
     if card is None:
         # Fall back to an empty card; the review gate flags it (missing ingredients/title).
         card = StructuredCard()
