@@ -24,7 +24,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Form, Header, HTTPException, Response, UploadFile
 from pydantic import BaseModel, ValidationError
 from recipe_pipeline_shared.jobs import JobStatus, SourceKind, ensure_transition
-from recipe_pipeline_shared.schema import Recipe, ReviewReport
+from recipe_pipeline_shared.schema import Recipe, ReviewReport, ReviewStatus
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -171,7 +171,7 @@ async def submit_result(
     session: AsyncSession = SessionDep,
 ) -> dict:
     job = await _get_job(session, job_id)
-    if job.status is JobStatus.NEEDS_REVIEW:
+    if job.status in (JobStatus.NEEDS_REVIEW, JobStatus.FAILED):
         # Idempotent retry: the previous POST landed but the response was lost.
         return {"status": job.status.value, "already": True}
     if job.status is not JobStatus.PROCESSING:
@@ -200,13 +200,24 @@ async def submit_result(
         session.add(row)
     row.data = recipe_model.model_dump(mode="json")
     row.review = review_model.model_dump(mode="json")
-    job.status = ensure_transition(job.status, JobStatus.NEEDS_REVIEW)
+    # A result whose OWN review verdict is `failed` (blank page, unreadable OCR) is a
+    # completed-but-failed extraction: file it under `failed` — same mapping the backfill
+    # used — instead of cluttering the human review queue. Recipe + pages are kept for
+    # inspection/escalation.
+    if review_model.status is ReviewStatus.FAILED:
+        job.status = ensure_transition(job.status, JobStatus.FAILED)
+        job.error = "; ".join(
+            f.detail for f in review_model.flags if f.severity == "fail"
+        ) or "extraction failed"
+    else:
+        job.status = ensure_transition(job.status, JobStatus.NEEDS_REVIEW)
+        job.error = None
     job.lease_owner = None
     job.lease_expires_at = None
-    job.error = None
     await session.commit()
-    logger.info("job %s done by %s -> needs_review (%d pages)", job.id, worker, len(page_assets))
-    return {"status": JobStatus.NEEDS_REVIEW.value, "already": False}
+    logger.info("job %s done by %s -> %s (%d pages)",
+                job.id, worker, job.status.value, len(page_assets))
+    return {"status": job.status.value, "already": False}
 
 
 class FailRequest(BaseModel):

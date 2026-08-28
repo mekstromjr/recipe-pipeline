@@ -153,8 +153,9 @@ def test_fail_path_and_idempotent_fail(env):
     r = client.post(f"/api/worker/jobs/{jid}/fail",
                     json={"worker": "w1", "error": "ocr exploded"}, headers=KEY)
     assert r.json() == {"status": "failed", "already": False}
-    assert client.post(f"/api/worker/jobs/{jid}/fail",
-                       json={"worker": "w1", "error": "again"}, headers=KEY).json()["already"] is True
+    again = client.post(f"/api/worker/jobs/{jid}/fail",
+                        json={"worker": "w1", "error": "again"}, headers=KEY)
+    assert again.json()["already"] is True
     d = client.get(f"/api/recipes/{jid}", headers=HUMAN)
     assert d.status_code == 404  # failed upload has no recipe row yet — not reviewable
 
@@ -186,3 +187,18 @@ def test_bad_result_payload_is_422_and_job_stays_processing(env):
     )
     assert r.status_code == 422
     assert submit(client, jid).status_code == 200  # a corrected retry still lands
+
+
+def test_failed_review_verdict_files_job_as_failed(env):
+    """A worker result whose OWN review says `failed` lands in failed, not the human queue."""
+    client, sync = env
+    jid = upload_pdf(client)
+    claim(client)
+    bad_review = {"status": "failed", "confidence": 0.1,
+                  "flags": [{"code": "empty_ocr", "severity": "fail", "detail": "no text found"}]}
+    r = submit(client, jid, review=bad_review)
+    assert r.json() == {"status": "failed", "already": False}
+    assert submit(client, jid, review=bad_review).json()["already"] is True  # still idempotent
+    assert client.get("/api/queue", headers=HUMAN).json() == []
+    s = client.get("/api/status", headers=HUMAN).json()
+    assert s["counts"] == {"failed": 1}
