@@ -1,0 +1,39 @@
+# recipe-pipeline WORKER — the pull loop: claim -> download -> OCR -> structure -> submit.
+#
+# A separate image from the server (Dockerfile), not a shared one with two entrypoints: the
+# worker pulls in Pillow/pypdfium2/numpy/deskew for page rendering, which the control plane
+# has no use for, and the two scale and fail independently.
+#
+# This image only became possible when Apple Vision was removed. The worker was macOS-bound
+# for its entire life — `pyobjc-framework-Vision` cannot install on linux — which is why it
+# ran from a launchd agent on a MacBook. glm-ocr runs over HTTP, so the worker is now
+# ordinary portable Python.
+FROM python:3.12.11-slim-bookworm
+
+COPY --from=ghcr.io/astral-sh/uv:0.7.17 /uv /uvx /bin/
+
+WORKDIR /app
+ENV UV_LINK_MODE=copy \
+    UV_COMPILE_BYTECODE=1 \
+    UV_PYTHON_DOWNLOADS=never \
+    # Unbuffered: the pull loop's claim/submit lines are the only visibility into a job that
+    # takes minutes, and buffered stdout hides them until the buffer fills.
+    PYTHONUNBUFFERED=1
+
+# Workspace manifests first so the third-party dependency layer caches across code changes.
+COPY pyproject.toml uv.lock ./
+COPY shared/pyproject.toml shared/pyproject.toml
+COPY server/pyproject.toml server/pyproject.toml
+COPY worker/pyproject.toml worker/pyproject.toml
+RUN uv sync --frozen --no-dev --no-install-workspace --package recipe-pipeline-worker
+
+COPY shared/ shared/
+COPY worker/ worker/
+RUN uv sync --frozen --no-dev --package recipe-pipeline-worker
+
+RUN useradd --create-home --uid 10001 app
+USER app
+
+# No ports and no probes: the worker is outbound-only. It holds ONE credential (the worker
+# API key) and never listens, so there is nothing to expose and nothing to authenticate.
+CMD ["/app/.venv/bin/recipe-pipeline", "work"]
