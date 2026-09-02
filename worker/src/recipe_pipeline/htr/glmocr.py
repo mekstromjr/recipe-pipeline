@@ -1,4 +1,4 @@
-"""glm-ocr backend — the production OCR engine, running on <pve-host>'s CPU Ollama (<ct>).
+"""glm-ocr backend — the production OCR engine, on the CPU Ollama in <ct>.
 
 Replaces Apple Vision. Measured against the ground-truth files in ``samples/``:
 

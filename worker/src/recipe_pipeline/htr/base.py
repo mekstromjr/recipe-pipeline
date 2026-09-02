@@ -1,7 +1,7 @@
 """OCR backend protocol + registry.
 
 A backend transcribes a whole page image and returns the text plus, where available, per-line
-detail (text, confidence, bbox). glm-ocr on <pve-host> is the production engine; the registry
+detail (text, confidence, bbox). glm-ocr in <ct> is the production engine; the registry
 keeps the interface pluggable (``openrouter`` remains registered for the escalation path).
 """
 
