@@ -66,6 +66,12 @@ class Recipe(BaseModel):
     unclear_spans: list[str] = Field(default_factory=list)  # things needing human review
     source_curiosities: str | None = None  # quaint off-recipe content (e.g. back of a clipping)
     ocr_confidence: float | None = None
+    # Which engines actually produced THIS recipe. Recorded per-recipe rather than derived
+    # from config at upload time: the models change (Apple Vision -> glm-ocr, gemma4 ->
+    # qwen3.5 within one month), and a recipe processed last year must keep saying what read
+    # it. The escalation path uses a different OCR engine for the same reason.
+    ocr_model: str | None = None
+    text_model: str | None = None
 
     # --- Source files ---
     source_pdf: str | None = None  # path to the original scanned PDF

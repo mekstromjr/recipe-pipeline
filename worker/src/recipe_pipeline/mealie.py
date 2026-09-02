@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import httpx
-from recipe_pipeline_shared.mealie_payload import recipe_to_payload
+from recipe_pipeline_shared.mealie_payload import model_tags, recipe_to_payload
 from recipe_pipeline_shared.slug import slugify
 
 if TYPE_CHECKING:
@@ -106,7 +106,9 @@ class MealieClient:
         self, recipe: Recipe, *, source_pdf: Path | None, page_one_image: Path | None
     ) -> str:
         """Create + PATCH the recipe, set the image, attach the PDF. Return the new slug."""
-        tags = self.ensure_tags([*recipe.tags, *self.settings.group_tag_list])
+        tags = self.ensure_tags(
+            [*recipe.tags, *model_tags(recipe), *self.settings.group_tag_list]
+        )
         categories = self.ensure_categories(recipe.categories)
         slug = self.create_recipe(recipe.name)
         self.patch_recipe(slug, recipe_to_payload(recipe, tags=tags, categories=categories))

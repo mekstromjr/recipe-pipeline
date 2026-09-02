@@ -90,9 +90,14 @@ class Settings(BaseSettings):
     # --- Mealie upload target (port-forward svc/mealie; plain ClusterIP, no Authentik) ---
     mealie_url: str = "http://localhost:9000"
     mealie_api_token: str | None = None
-    # Fixed tags added to EVERY uploaded recipe, so this batch is filterable in Mealie:
-    # source person, that it's a scan, and the pipeline version. Comma-separated.
-    group_tags: str = "a family member,Scan,recipe-pipeline-v1"
+    # Fixed tags added to EVERY uploaded recipe, so a pipeline batch is filterable in Mealie.
+    # NO PERSON HERE. This defaulted to "a family member" while the corpus was one person's recipe
+    # box; that is wrong for anything uploaded since, and a per-recipe attribution belongs with
+    # the recipe (the card's own byline lands in source_curiosities), not in a global default.
+    # Set RECIPE_GROUP_TAGS to add a batch label when one genuinely applies.
+    # The models that processed each recipe are tagged separately, from the recipe itself —
+    # see mealie_payload.model_tags.
+    group_tags: str = "Scan,recipe-pipeline-v1"
 
     @property
     def group_tag_list(self) -> list[str]:

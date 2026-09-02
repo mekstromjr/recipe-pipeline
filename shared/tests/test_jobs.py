@@ -63,3 +63,38 @@ def test_illegal_transitions_raise(src, dst):
 
 def test_ensure_transition_returns_dst_when_legal():
     assert ensure_transition(JobStatus.QUEUED, JobStatus.PROCESSING) is JobStatus.PROCESSING
+
+
+# --- model provenance tags -------------------------------------------------------------------
+
+def test_model_tags_names_both_engines():
+    from recipe_pipeline_shared.mealie_payload import model_tags
+    from recipe_pipeline_shared.schema import Recipe
+
+    tags = model_tags(Recipe(name="x", ocr_model="glm-ocr:latest", text_model="qwen3.5:4b"))
+    assert tags == ["ocr:glm-ocr", "llm:qwen3.5:4b"]
+
+
+def test_model_tags_omitted_for_recipes_processed_before_the_fields_existed():
+    """No tag is better than a wrong one — the models have changed twice in a month."""
+    from recipe_pipeline_shared.mealie_payload import model_tags
+    from recipe_pipeline_shared.schema import Recipe
+
+    assert model_tags(Recipe(name="x")) == []
+
+
+def test_model_tags_reflect_the_escalation_engine():
+    """The cloud escalation path uses a different OCR model; the tag must say so."""
+    from recipe_pipeline_shared.mealie_payload import model_tags
+    from recipe_pipeline_shared.schema import Recipe
+
+    recipe = Recipe(name="x", ocr_model="google/gemini-2.5-flash", text_model="qwen3.5:4b")
+    tags = model_tags(recipe)
+    assert tags[0] == "ocr:google/gemini-2.5-flash"
+
+
+def test_group_tags_no_longer_hardcode_a_person():
+    """"a family member" was right for one recipe box and wrong for everything uploaded since."""
+    from recipe_pipeline.config import Settings
+
+    assert "a family member" not in Settings(_env_file=None).group_tags

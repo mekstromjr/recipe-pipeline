@@ -8,7 +8,7 @@ arrives as bytes pulled from Garage rather than local files.
 from __future__ import annotations
 
 import httpx
-from recipe_pipeline_shared.mealie_payload import recipe_to_payload
+from recipe_pipeline_shared.mealie_payload import model_tags, recipe_to_payload
 from recipe_pipeline_shared.schema import Recipe
 from recipe_pipeline_shared.slug import slugify
 
@@ -82,7 +82,9 @@ class MealieClient:
         try:
             tags = [
                 await self._ensure_organizer("tags", n)
-                for n in dict.fromkeys([*recipe.tags, *self.settings.group_tag_list])
+                for n in dict.fromkeys(
+                    [*recipe.tags, *model_tags(recipe), *self.settings.group_tag_list]
+                )
             ]
             categories = [
                 await self._ensure_organizer("categories", n)
