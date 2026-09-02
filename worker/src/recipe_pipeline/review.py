@@ -17,13 +17,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
+from PIL import Image
 from recipe_pipeline_shared.schema import ReviewFlag, ReviewReport, ReviewStatus
 
 from recipe_pipeline import ollama_client
+from recipe_pipeline.htr import glmocr
 from recipe_pipeline.prompts import REVIEW_SYSTEM_PROMPT
 
 if TYPE_CHECKING:
-    from PIL import Image
     from recipe_pipeline_shared.schema import Recipe
 
     from recipe_pipeline.config import Settings
@@ -36,6 +37,21 @@ MANY_UNCLEAR = 6  # this many [UNCLEAR] spans => hard fail
 LLM_FAIL_CONFIDENCE = 0.4
 LLM_WARN_CONFIDENCE = 0.7
 
+# --- glm-ocr-specific failure modes (MEASURED, not anticipated) -----------------------------
+# Both were observed on this corpus and neither is caught by EMPTY_OCR_CHARS, because both
+# produce plenty of characters. See docs/redesign-v2-plan.md.
+#
+# 1. Degenerate output: on faint/low-signal pages glm-ocr emits a long run of a single
+#    character ("-\n-\n-\n..."). The faint sample produced 1434 such characters, which
+#    sailed through the empty-OCR gate as a clean result.
+# 2. Repetition: the model re-emits the whole transcript 2-3x verbatim. Seen in 4 of 5 test
+#    pages. A clean whole-transcript repeat is recoverable (de-duplicate); a partial one is
+#    not, so it is flagged rather than silently "fixed".
+DEGENERATE_MIN_CHARS = 40  # below this, EMPTY_OCR_CHARS/short-page handling already applies
+DEGENERATE_ALNUM_RATIO = 0.35  # real recipe text measures ~0.6-0.75 alphanumeric
+DEGENERATE_DISTINCT_CHARS = 12  # a page of "-\n" has ~2; the faint sample's tail had ~6
+REPEAT_MIN_BLOCK_CHARS = 60  # ignore trivially short "repeats" (a recurring line is not one)
+
 
 def is_faint(image: Image.Image) -> bool:
     """True if a page is faint / near-blank (low ink fraction or low contrast)."""
@@ -45,10 +61,79 @@ def is_faint(image: Image.Image) -> bool:
     return frac < FAINT_DARK_FRACTION or std < FAINT_STD
 
 
+def is_degenerate(text: str) -> bool:
+    """True if OCR returned filler rather than content (a long run of one or two characters).
+
+    Judged on character DIVERSITY, not length: the failure produces hundreds of valid
+    characters, so any length-based check passes it.
+    """
+    stripped = "".join(text.split())
+    if len(stripped) < DEGENERATE_MIN_CHARS:
+        return False  # too short to judge; the empty-OCR gate covers this range
+    alnum_ratio = sum(c.isalnum() for c in stripped) / len(stripped)
+    return alnum_ratio < DEGENERATE_ALNUM_RATIO or len(set(stripped)) < DEGENERATE_DISTINCT_CHARS
+
+
+def _content_lines(text: str) -> list[str]:
+    """Non-empty lines, stripped — the unit of comparison for repeat detection.
+
+    Comparing on lines rather than raw characters is what catches the real-world case: glm-ocr
+    re-emits the transcript with DIFFERENT blank-line spacing between the copies, so a
+    character-level or whitespace-sensitive prefix match misses it entirely (measured on the
+    cheese-ball card, where the first copy is blank-line separated and the second is not).
+    """
+    return [ln.strip() for ln in text.splitlines() if ln.strip()]
+
+
+def dedupe_repeats(text: str) -> tuple[str, bool]:
+    """Collapse a whole-transcript repeat. Returns (text, was_partial_repeat).
+
+    glm-ocr often emits the transcript 2-3x. When the repeat is exact, dropping the copies is
+    lossless. When it repeats only PARTIALLY the copies may differ, and picking one would be a
+    silent guess — so the text is left intact and the caller is told to flag it for a human.
+    """
+    body = text.strip()
+    if len(body) < REPEAT_MIN_BLOCK_CHARS * 2:
+        return text, False
+
+    # 1. Exact character-level tiling (the string is its own prefix repeated k times).
+    for k in (2, 3, 4):
+        if len(body) % k == 0:
+            unit = body[: len(body) // k]
+            if len(unit) >= REPEAT_MIN_BLOCK_CHARS and unit * k == body:
+                return unit, False
+
+    # 2. Line-level tiling — same repeat, but with the copies spaced differently.
+    lines = _content_lines(body)
+    for k in (2, 3, 4):
+        if len(lines) >= k * 2 and len(lines) % k == 0:
+            unit = lines[: len(lines) // k]
+            if unit * k == lines and sum(map(len, unit)) >= REPEAT_MIN_BLOCK_CHARS:
+                return "\n".join(unit), False
+
+    # 3. Partial repeat: the opening text recurs later without tiling the whole thing. Matched
+    #    on whitespace-NORMALIZED characters, which covers both real variants — copies spaced
+    #    differently, and copies glued together so the repeated head is no longer its own line.
+    #    Real content may differ between the copies, so report rather than choose.
+    flat = " ".join(body.split())
+    head = flat[:REPEAT_MIN_BLOCK_CHARS]
+    if len(flat) >= REPEAT_MIN_BLOCK_CHARS * 2 and flat.find(head, REPEAT_MIN_BLOCK_CHARS) != -1:
+        return text, True
+    return text, False
+
+
 def assess_ocr(text: str) -> list[ReviewFlag]:
-    """Flag a page where OCR found essentially nothing (blank/illegible scan)."""
+    """Flag a page where OCR found nothing, or returned filler instead of content."""
     if len(text.strip()) < EMPTY_OCR_CHARS:
         return [ReviewFlag(code="empty_ocr", severity="fail", detail="OCR found ~nothing")]
+    if is_degenerate(text):
+        return [
+            ReviewFlag(
+                code="degenerate_ocr",
+                severity="fail",
+                detail="OCR returned filler (repeated single character), not text",
+            )
+        ]
     return []
 
 
@@ -91,12 +176,18 @@ def llm_review(
 ) -> tuple[float, list[ReviewFlag]]:
     """Vision-LLM review: compare the recipe to the image, return (confidence, flags)."""
     recipe_text = recipe.model_dump_json(indent=2)
+    # Downscale before sending: the vision encoder's cost scales with pixel count, and a
+    # full-resolution scan buys no accuracy at this model size.
+    images = [
+        glmocr.downscale(Image.open(p).convert("RGB"), settings.ocr_max_edge)
+        for p in page_images
+    ]
     reply = ollama_client.chat(
         settings,
         system=REVIEW_SYSTEM_PROMPT,
         user=f"Structured recipe:\n{recipe_text}\n\nReview it against the page image(s).",
-        images=page_images,
-        model=settings.vision_model,
+        images=images,
+        model=settings.text_model,
     )
     data = _parse_json(reply)
     confidence = float(data.get("confidence", 0.0))

@@ -67,3 +67,94 @@ def test_assess_unclear_thresholds():
     assert one is not None and one.severity == "warn"
     many = review.assess_unclear("[UNCLEAR]" * review.MANY_UNCLEAR)
     assert many.severity == "fail"
+
+
+# --- glm-ocr failure modes ------------------------------------------------------------------
+# Fixtures are REAL glm-ocr output captured from the samples corpus, not invented strings.
+
+_FAINT_DEGENERATE = (
+    "A blister filling\nconsistent always, shopped color,\n"
+    "green more than possible texture\n" + "-\n" * 180
+)
+_GOOD = (
+    "Jello - Cabbage Salad\n\n1 6 oz. pkg lime jello\n2 cups boiling water\n"
+    "20 large marshmellows (cut up (or 4 cups small ones)\n2 cup crushed pineapple\n"
+    "Mix jello and hot water until dissolved. Then add mellows and stir in hot mixture."
+)
+
+
+def test_degenerate_detects_repeated_single_character():
+    """The faint page produced 400+ chars of '-' and passed the empty-OCR gate."""
+    assert review.is_degenerate(_FAINT_DEGENERATE)
+
+
+def test_degenerate_does_not_flag_real_transcript():
+    assert not review.is_degenerate(_GOOD)
+
+
+def test_degenerate_ignores_short_text():
+    """Below the length floor the empty-OCR gate applies instead; don't double-judge."""
+    assert not review.is_degenerate("1 cup flour")
+
+
+def test_assess_ocr_fails_degenerate_output():
+    flags = review.assess_ocr(_FAINT_DEGENERATE)
+    assert [f.code for f in flags] == ["degenerate_ocr"]
+    assert flags[0].severity == "fail"
+
+
+def test_dedupe_collapses_exact_whole_transcript_repeat():
+    text, partial = review.dedupe_repeats(_GOOD + _GOOD)
+    assert text == _GOOD
+    assert partial is False
+
+
+def test_dedupe_leaves_clean_text_alone():
+    text, partial = review.dedupe_repeats(_GOOD)
+    assert text == _GOOD
+    assert partial is False
+
+
+def test_dedupe_flags_partial_repeat_without_editing():
+    """A partial repeat may differ between copies, so choosing one would be a silent guess."""
+    source = _GOOD + _GOOD[:90]
+    text, partial = review.dedupe_repeats(source)
+    assert partial is True
+    assert text == source
+
+
+def test_dedupe_collapses_three_times_repeat():
+    """3x was the most common multiplicity observed in the glm-ocr bake-off."""
+    text, partial = review.dedupe_repeats(_GOOD * 3)
+    assert text == _GOOD
+    assert partial is False
+
+
+# The copies glm-ocr emits often differ in blank-line spacing, so a whitespace-sensitive
+# match misses them. This fixture is the real cheese-ball repeat, spacing and all.
+_REPEAT_DIFFERENT_SPACING = (
+    "Class Ball\n2 glasses Old English\nGlaze Blue Ale\n\n"
+    "Large Pig's Cream Cheese (philly)\nTablespoon Proteatobic sauce\n\n"
+    "1 small onion grated\n\n1 cup fresh parsley chopped\n\n"
+    "Chill good before serving.\n"
+    "Class Ball\n2 glasses Old English\nGlaze Blue Ale\n"
+    "Large Pig's Cream Cheese (philly)\nTablespoon Proteatobic sauce\n"
+    "1 small onion grated\n1 cup fresh parsley chopped\n"
+    "Chill good before serving."
+)
+
+
+def test_dedupe_collapses_repeat_with_different_line_spacing():
+    """Line-level tiling: the same transcript twice, blank-line separated then compact."""
+    text, partial = review.dedupe_repeats(_REPEAT_DIFFERENT_SPACING)
+    assert partial is False
+    assert text.count("Class Ball") == 1
+    assert "Chill good before serving." in text
+
+
+def test_dedupe_flags_truncated_repeat_with_different_spacing():
+    """A repeat cut off mid-way does not tile, so it must be FLAGGED, not silently trimmed."""
+    source = _REPEAT_DIFFERENT_SPACING[:-15]
+    text, partial = review.dedupe_repeats(source)
+    assert partial is True
+    assert text == source

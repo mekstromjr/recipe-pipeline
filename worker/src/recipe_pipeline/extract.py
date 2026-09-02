@@ -1,7 +1,7 @@
 """End-to-end extraction: scanned recipe PDFs -> reviewed recipe output under ``output/``.
 
-Per-recipe flow:  render -> preprocess (orient/deskew) -> OCR (Apple Vision) -> structure ->
-enrich -> review. Significant failures are HELD; minor issues upload with an Import Software Note.
+Per-recipe flow:  render -> OCR (glm-ocr, <ct>) -> structure -> enrich -> review.
+Significant failures are HELD; minor issues upload with an Import Software Note.
 No Mealie upload (recipes are bulk-imported manually). A run logs per-stage progress to the
 console and ``output/run.log`` and writes a summary ``output/_manifest.json``.
 """
@@ -63,14 +63,12 @@ def extract_recipe(
 
     ``ocr_backend`` overrides the OCR engine (used by ``escalate`` to re-OCR with the cloud model).
     """
-    backend_name = ocr_backend or settings.ocr_a
+    backend_name = ocr_backend or settings.ocr_backend
     out_dir = settings.outbox / job.slug
     with _stage("render"):
         page_images = pdf.render_pages_to_dir(job.pdf_path, out_dir / "pages")
 
-    ocr = get_backend(backend_name)
-    # Apple Vision returns a 180 page bottom-to-top (reverse it); cloud models auto-orient.
-    reverse_180 = backend_name == "applevision"
+    ocr = get_backend(backend_name, settings)
 
     flags: list[ReviewFlag] = []
     ocr_pages: list[str] = []
@@ -79,20 +77,29 @@ def extract_recipe(
         logger.info("    page %d/%d", n, len(page_images))
         page_img = Image.open(page_path)
         faint = review.is_faint(page_img)
-        # OCR the RAW page — Apple Vision reads any orientation and a pre-rotated image OCRs worse.
+        # OCR the RAW page. glm-ocr reads any orientation in correct line order, and
+        # pre-rotating measurably degrades it — so there is no orientation stage at all.
         with _stage("ocr"):
             result = ocr.transcribe_page(page_img)
-        with _stage("orient"):
-            deg = preprocess.detect_rotation(settings, page_img)
-        lines = list(reversed(result.lines)) if (reverse_180 and deg == 180) else result.lines
-        text = "\n".join(ln.text for ln in lines) if lines else result.text
+        # glm-ocr frequently re-emits the whole transcript verbatim. An exact repeat is
+        # dropped losslessly; a partial one is kept and flagged, because the copies can
+        # differ and silently picking one would be a guess.
+        text, partial_repeat = review.dedupe_repeats(result.text)
+        if partial_repeat:
+            flags.append(
+                ReviewFlag(
+                    code="repeated_ocr",
+                    severity="warn",
+                    detail="OCR partially repeated itself — verify no text was lost",
+                )
+            )
         ocr_pages.append(text)
         # A faint page only matters if it produced text (risk of misread). A faint BLANK page
         # (e.g. the back of a 2-page card) is harmless and must not fail the recipe.
         if faint and len(text.strip()) >= review.EMPTY_OCR_CHARS:
             faint_content_pages += 1
-        # Persist an upright page for the review pass + Mealie display image (NOT for OCR).
-        preprocess.make_upright(page_img, deg).convert("RGB").save(page_path, "JPEG", quality=92)
+        # Persist a deskewed page for the review UI + Mealie display image (NOT for OCR).
+        preprocess.make_upright(page_img).convert("RGB").save(page_path, "JPEG", quality=92)
 
     # Empty only if the WHOLE scan is unreadable — a single blank page among good ones is fine.
     flags.extend(review.assess_ocr("\n".join(ocr_pages)))
@@ -106,10 +113,26 @@ def extract_recipe(
         )
 
     with _stage("structure"):
-        recipe = structure.structure(
-            settings, ocr_pages=ocr_pages, source_pdf=str(job.pdf_path),
-            verbatim="\n\n".join(ocr_pages),
-        )
+        try:
+            recipe = structure.structure(
+                settings, ocr_pages=ocr_pages, source_pdf=str(job.pdf_path),
+                verbatim="\n\n".join(ocr_pages),
+            )
+        except structure.StructureError as exc:
+            # A model failure must not read as "this card had no ingredients" — that sends a
+            # perfectly good scan to review with a misleading reason. Flag it as its own
+            # failure and keep the batch moving.
+            logger.warning("    structure failed: %s", exc)
+            flags.append(
+                ReviewFlag(
+                    code="structure_failed",
+                    severity="fail",
+                    detail="the model returned unusable output; OCR text is intact",
+                )
+            )
+            recipe = structure.empty_recipe(
+                ocr_pages=ocr_pages, source_pdf=str(job.pdf_path)
+            )
     with _stage("enrich"):
         recipe = enrich_mod.enrich(settings, recipe)
     recipe.page_images = [p.name for p in page_images]

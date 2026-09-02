@@ -1,8 +1,8 @@
 """OCR backend protocol + registry.
 
 A backend transcribes a whole page image and returns the text plus, where available, per-line
-detail (text, confidence, bbox). Apple Vision is the production engine (accurate, on-device,
-orientation-tolerant); the registry keeps the interface pluggable for future engines.
+detail (text, confidence, bbox). glm-ocr in <ct> is the production engine; the registry
+keeps the interface pluggable (``openrouter`` remains registered for the escalation path).
 """
 
 from __future__ import annotations
@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from PIL import Image
+
+    from recipe_pipeline.config import Settings
 
 
 @dataclass
@@ -46,9 +48,9 @@ class HTRBackend(Protocol):
         ...
 
 
-# Backend identifier -> dotted import path of a factory `build() -> HTRBackend`.
+# Backend identifier -> dotted import path of a factory `build(settings) -> HTRBackend`.
 _REGISTRY: dict[str, str] = {
-    "applevision": "recipe_pipeline.htr.applevision:build",
+    "glmocr": "recipe_pipeline.htr.glmocr:build",
     "openrouter": "recipe_pipeline.htr.openrouter:build",  # cloud escalation for hard cursive
 }
 
@@ -57,12 +59,17 @@ def known_backends() -> list[str]:
     return sorted(_REGISTRY)
 
 
-def get_backend(name: str) -> HTRBackend:
-    """Instantiate a backend by name. Raises ``KeyError`` for unknown names."""
+def get_backend(name: str, settings: Settings) -> HTRBackend:
+    """Instantiate a backend by name. Raises ``KeyError`` for unknown names.
+
+    ``settings`` is passed in rather than each backend calling ``load_settings()`` itself, so
+    a caller that has already configured settings (tests, or an env override) cannot be
+    silently overridden by a second read of `.env`.
+    """
     import importlib
 
     if name not in _REGISTRY:
         raise KeyError(f"Unknown OCR backend {name!r}. Known: {known_backends()}")
     module_path, factory = _REGISTRY[name].split(":")
     mod = importlib.import_module(module_path)
-    return getattr(mod, factory)()
+    return getattr(mod, factory)(settings)

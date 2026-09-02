@@ -74,5 +74,5 @@ class OpenRouterVisionBackend:
         return PageResult(text=text, lines=[OcrLine(text=ln) for ln in text.splitlines() if ln])
 
 
-def build() -> HTRBackend:
-    return OpenRouterVisionBackend(load_settings())
+def build(settings: Settings | None = None) -> HTRBackend:
+    return OpenRouterVisionBackend(settings or load_settings())

@@ -21,6 +21,29 @@ if TYPE_CHECKING:
     from recipe_pipeline.config import Settings
 
 
+class StructureError(RuntimeError):
+    """The model returned something unusable — distinct from a card that genuinely has no
+    ingredients. The pipeline must be able to tell those apart in review."""
+
+
+# Fields the model MUST emit. Ollama's `format` is CONSTRAINED DECODING: it guarantees the
+# output validates against the schema, nothing more. With no `required` list, `{}` validates,
+# and qwen3.5:4b takes that cheapest legal path — measured: a perfect OCR transcript produced
+# `{"recipe_yield": "", "source_curiosities": null}` and nothing else.
+#
+# These are marked required in the SCHEMA SENT TO OLLAMA only; the Pydantic model below stays
+# lenient so parsing never crashes. `name` types as "string", so requiring it yields "" rather
+# than the null that caused the original nightly retry loop.
+REQUIRED_FIELDS = ["name", "ingredients", "instructions"]
+
+
+def _ollama_schema() -> dict:
+    """StructuredCard's JSON schema with the content fields marked required."""
+    schema = StructuredCard.model_json_schema()
+    schema["required"] = list(REQUIRED_FIELDS)
+    return schema
+
+
 class StructuredCard(BaseModel):
     """Flat shape the LLM fills (constrained via Ollama JSON-schema output)."""
 
@@ -53,6 +76,20 @@ def _degenerate(card: StructuredCard) -> bool:
     """An 'answer' with no name, ingredients, or steps is no answer at all."""
     return not card.name and not card.ingredients and not card.instructions
 
+def empty_recipe(*, ocr_pages: list[str], source_pdf: str) -> Recipe:
+    """A content-free Recipe that still carries the OCR text, for when structuring fails.
+
+    The transcription is the expensive part and it succeeded, so it must survive: a human in
+    the review queue can work from it even though no fields were extracted.
+    """
+    ocr_text = "\n\n".join(ocr_pages)
+    first = next((ln.strip() for ln in ocr_text.splitlines() if ln.strip()), "")
+    return Recipe(
+        name=first[:60] or "Untitled (needs review)",
+        original_transcription=ocr_text,
+        source_pdf=source_pdf,
+    )
+
 
 def structure(
     settings: Settings,
@@ -69,7 +106,7 @@ def structure(
             settings,
             system=STRUCTURE_SYSTEM_PROMPT,
             user=f"OCR transcription (all pages):\n\n{ocr_text}{user_suffix}",
-            model=settings.enrich_model,  # text model
+            model=settings.text_model,
             format=fmt,
         )
         try:
@@ -78,14 +115,17 @@ def structure(
             # Malformed model output must not crash the batch (it would retry forever).
             return None
 
-    card = _ask(StructuredCard.model_json_schema())
+    # Attempt 1: schema-constrained, with the content fields REQUIRED. Constrained decoding
+    # only guarantees the reply VALIDATES — with every field optional, `{}` validates, so the
+    # collapse below is the model taking the cheapest legal path. Requiring the content fields
+    # removes that path, which is cheaper than detecting the collapse and paying for a retry.
+    card = _ask(_ollama_schema())
     if (card is None or _degenerate(card)) and ocr_text.strip():
-        # Schema-constrained decode can COLLAPSE to `{}` on some Ollama/model pairings
-        # (observed: Ollama 0.32.14 + gemma4:e4b returns a bare empty object while the
-        # UNCONSTRAINED reply is a perfect answer). Retry once free-form; `{}` is valid
-        # JSON so this can't be caught as a parse error — it must be caught as emptiness.
-        # Unconstrained, the model invents its own keys ("title", nested objects...), so
-        # the retry prompt pins the EXACT flat shape it must produce.
+        # Attempt 2 (kept as the safety net): some Ollama/model pairings collapse to `{}` even
+        # so — observed on 0.32.14 + gemma4:e4b, where the UNCONSTRAINED reply is a perfect
+        # answer. `{}` is valid JSON, so this cannot be caught as a parse error; it must be
+        # caught as emptiness. Unconstrained, the model invents its own keys ("title", nested
+        # objects...), so the retry prompt pins the EXACT flat shape it must produce.
         keys = (
             'Respond with ONLY a JSON object using exactly these keys: "name" (string), '
             '"description" (string or null), "ingredients" (array of strings), '
@@ -96,9 +136,14 @@ def structure(
         retry = _ask(None, user_suffix=f"\n\n{keys}")
         if retry is not None and not _degenerate(retry):
             card = retry
-    if card is None:
-        # Fall back to an empty card; the review gate flags it (missing ingredients/title).
-        card = StructuredCard()
+    if card is None or _degenerate(card):
+        # BOTH attempts failed. That is a model failure, not a card that happens to be empty,
+        # and the two must stay distinguishable: falling back to an empty card here makes
+        # review show "no ingredients", which reads as a fact about the scan.
+        raise StructureError(
+            "structuring produced no name, ingredients or instructions "
+            "(schema-constrained and free-form attempts both failed)"
+        )
 
     # A page with no readable title still gets a usable name (the gate flags it for review).
     name = card.name.strip() if card.name else ""
