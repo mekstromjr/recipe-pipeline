@@ -37,6 +37,21 @@ MANY_UNCLEAR = 6  # this many [UNCLEAR] spans => hard fail
 LLM_FAIL_CONFIDENCE = 0.4
 LLM_WARN_CONFIDENCE = 0.7
 
+# --- glm-ocr-specific failure modes (MEASURED, not anticipated) -----------------------------
+# Both were observed on this corpus and neither is caught by EMPTY_OCR_CHARS, because both
+# produce plenty of characters. See docs/redesign-v2-plan.md.
+#
+# 1. Degenerate output: on faint/low-signal pages glm-ocr emits a long run of a single
+#    character ("-\n-\n-\n..."). The faint sample produced 1434 such characters, which
+#    sailed through the empty-OCR gate as a clean result.
+# 2. Repetition: the model re-emits the whole transcript 2-3x verbatim. Seen in 4 of 5 test
+#    pages. A clean whole-transcript repeat is recoverable (de-duplicate); a partial one is
+#    not, so it is flagged rather than silently "fixed".
+DEGENERATE_MIN_CHARS = 40  # below this, EMPTY_OCR_CHARS/short-page handling already applies
+DEGENERATE_ALNUM_RATIO = 0.35  # real recipe text measures ~0.6-0.75 alphanumeric
+DEGENERATE_DISTINCT_CHARS = 12  # a page of "-\n" has ~2; the faint sample's tail had ~6
+REPEAT_MIN_BLOCK_CHARS = 60  # ignore trivially short "repeats" (a recurring line is not one)
+
 
 def is_faint(image: Image.Image) -> bool:
     """True if a page is faint / near-blank (low ink fraction or low contrast)."""
@@ -46,10 +61,59 @@ def is_faint(image: Image.Image) -> bool:
     return frac < FAINT_DARK_FRACTION or std < FAINT_STD
 
 
+def is_degenerate(text: str) -> bool:
+    """True if OCR returned filler rather than content (a long run of one or two characters).
+
+    Judged on character DIVERSITY, not length: the failure produces hundreds of valid
+    characters, so any length-based check passes it.
+    """
+    stripped = "".join(text.split())
+    if len(stripped) < DEGENERATE_MIN_CHARS:
+        return False  # too short to judge; the empty-OCR gate covers this range
+    alnum_ratio = sum(c.isalnum() for c in stripped) / len(stripped)
+    return alnum_ratio < DEGENERATE_ALNUM_RATIO or len(set(stripped)) < DEGENERATE_DISTINCT_CHARS
+
+
+def dedupe_repeats(text: str) -> tuple[str, bool]:
+    """Collapse a whole-transcript repeat. Returns (text, was_partial_repeat).
+
+    glm-ocr often emits the transcript 2-3x verbatim. When the tail is an exact repeat of the
+    head, dropping it is lossless. When it repeats only PARTIALLY the two copies may differ,
+    and picking one would be a silent guess — so the text is left intact and the caller is
+    told to flag it for a human.
+    """
+    body = text.strip()
+    if len(body) < REPEAT_MIN_BLOCK_CHARS * 2:
+        return text, False
+
+    # Exact whole-transcript repeat: the string is its own prefix repeated k times.
+    for k in (2, 3, 4):
+        if len(body) % k == 0:
+            unit = body[: len(body) // k]
+            if len(unit) >= REPEAT_MIN_BLOCK_CHARS and unit * k == body:
+                return unit, False
+
+    # Otherwise look for the longest prefix that recurs later in the text. A long recurrence
+    # that does not tile the whole string is a PARTIAL repeat: real content may differ between
+    # the copies, so report it instead of choosing one.
+    head = body[:REPEAT_MIN_BLOCK_CHARS]
+    if body.find(head, REPEAT_MIN_BLOCK_CHARS) != -1:
+        return text, True
+    return text, False
+
+
 def assess_ocr(text: str) -> list[ReviewFlag]:
-    """Flag a page where OCR found essentially nothing (blank/illegible scan)."""
+    """Flag a page where OCR found nothing, or returned filler instead of content."""
     if len(text.strip()) < EMPTY_OCR_CHARS:
         return [ReviewFlag(code="empty_ocr", severity="fail", detail="OCR found ~nothing")]
+    if is_degenerate(text):
+        return [
+            ReviewFlag(
+                code="degenerate_ocr",
+                severity="fail",
+                detail="OCR returned filler (repeated single character), not text",
+            )
+        ]
     return []
 
 

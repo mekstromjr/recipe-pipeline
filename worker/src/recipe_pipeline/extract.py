@@ -81,7 +81,18 @@ def extract_recipe(
         # pre-rotating measurably degrades it — so there is no orientation stage at all.
         with _stage("ocr"):
             result = ocr.transcribe_page(page_img)
-        text = result.text
+        # glm-ocr frequently re-emits the whole transcript verbatim. An exact repeat is
+        # dropped losslessly; a partial one is kept and flagged, because the copies can
+        # differ and silently picking one would be a guess.
+        text, partial_repeat = review.dedupe_repeats(result.text)
+        if partial_repeat:
+            flags.append(
+                ReviewFlag(
+                    code="repeated_ocr",
+                    severity="warn",
+                    detail="OCR partially repeated itself — verify no text was lost",
+                )
+            )
         ocr_pages.append(text)
         # A faint page only matters if it produced text (risk of misread). A faint BLANK page
         # (e.g. the back of a 2-page card) is harmless and must not fail the recipe.

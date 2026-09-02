@@ -67,3 +67,57 @@ def test_assess_unclear_thresholds():
     assert one is not None and one.severity == "warn"
     many = review.assess_unclear("[UNCLEAR]" * review.MANY_UNCLEAR)
     assert many.severity == "fail"
+
+
+# --- glm-ocr failure modes ------------------------------------------------------------------
+# Fixtures are REAL glm-ocr output captured from the samples corpus, not invented strings.
+
+_FAINT_DEGENERATE = (
+    "A blister filling\nconsistent always, shopped color,\n"
+    "green more than possible texture\n" + "-\n" * 180
+)
+_GOOD = (
+    "Jello - Cabbage Salad\n\n1 6 oz. pkg lime jello\n2 cups boiling water\n"
+    "20 large marshmellows (cut up (or 4 cups small ones)\n2 cup crushed pineapple\n"
+    "Mix jello and hot water until dissolved. Then add mellows and stir in hot mixture."
+)
+
+
+def test_degenerate_detects_repeated_single_character():
+    """The faint page produced 400+ chars of '-' and passed the empty-OCR gate."""
+    assert review.is_degenerate(_FAINT_DEGENERATE)
+
+
+def test_degenerate_does_not_flag_real_transcript():
+    assert not review.is_degenerate(_GOOD)
+
+
+def test_degenerate_ignores_short_text():
+    """Below the length floor the empty-OCR gate applies instead; don't double-judge."""
+    assert not review.is_degenerate("1 cup flour")
+
+
+def test_assess_ocr_fails_degenerate_output():
+    flags = review.assess_ocr(_FAINT_DEGENERATE)
+    assert [f.code for f in flags] == ["degenerate_ocr"]
+    assert flags[0].severity == "fail"
+
+
+def test_dedupe_collapses_exact_whole_transcript_repeat():
+    text, partial = review.dedupe_repeats(_GOOD + _GOOD)
+    assert text == _GOOD
+    assert partial is False
+
+
+def test_dedupe_leaves_clean_text_alone():
+    text, partial = review.dedupe_repeats(_GOOD)
+    assert text == _GOOD
+    assert partial is False
+
+
+def test_dedupe_flags_partial_repeat_without_editing():
+    """A partial repeat may differ between copies, so choosing one would be a silent guess."""
+    source = _GOOD + _GOOD[:90]
+    text, partial = review.dedupe_repeats(source)
+    assert partial is True
+    assert text == source
