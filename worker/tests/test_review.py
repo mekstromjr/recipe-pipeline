@@ -121,3 +121,40 @@ def test_dedupe_flags_partial_repeat_without_editing():
     text, partial = review.dedupe_repeats(source)
     assert partial is True
     assert text == source
+
+
+def test_dedupe_collapses_three_times_repeat():
+    """3x was the most common multiplicity observed in the glm-ocr bake-off."""
+    text, partial = review.dedupe_repeats(_GOOD * 3)
+    assert text == _GOOD
+    assert partial is False
+
+
+# The copies glm-ocr emits often differ in blank-line spacing, so a whitespace-sensitive
+# match misses them. This fixture is the real cheese-ball repeat, spacing and all.
+_REPEAT_DIFFERENT_SPACING = (
+    "Class Ball\n2 glasses Old English\nGlaze Blue Ale\n\n"
+    "Large Pig's Cream Cheese (philly)\nTablespoon Proteatobic sauce\n\n"
+    "1 small onion grated\n\n1 cup fresh parsley chopped\n\n"
+    "Chill good before serving.\n"
+    "Class Ball\n2 glasses Old English\nGlaze Blue Ale\n"
+    "Large Pig's Cream Cheese (philly)\nTablespoon Proteatobic sauce\n"
+    "1 small onion grated\n1 cup fresh parsley chopped\n"
+    "Chill good before serving."
+)
+
+
+def test_dedupe_collapses_repeat_with_different_line_spacing():
+    """Line-level tiling: the same transcript twice, blank-line separated then compact."""
+    text, partial = review.dedupe_repeats(_REPEAT_DIFFERENT_SPACING)
+    assert partial is False
+    assert text.count("Class Ball") == 1
+    assert "Chill good before serving." in text
+
+
+def test_dedupe_flags_truncated_repeat_with_different_spacing():
+    """A repeat cut off mid-way does not tile, so it must be FLAGGED, not silently trimmed."""
+    source = _REPEAT_DIFFERENT_SPACING[:-15]
+    text, partial = review.dedupe_repeats(source)
+    assert partial is True
+    assert text == source

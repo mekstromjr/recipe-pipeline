@@ -74,30 +74,50 @@ def is_degenerate(text: str) -> bool:
     return alnum_ratio < DEGENERATE_ALNUM_RATIO or len(set(stripped)) < DEGENERATE_DISTINCT_CHARS
 
 
+def _content_lines(text: str) -> list[str]:
+    """Non-empty lines, stripped — the unit of comparison for repeat detection.
+
+    Comparing on lines rather than raw characters is what catches the real-world case: glm-ocr
+    re-emits the transcript with DIFFERENT blank-line spacing between the copies, so a
+    character-level or whitespace-sensitive prefix match misses it entirely (measured on the
+    cheese-ball card, where the first copy is blank-line separated and the second is not).
+    """
+    return [ln.strip() for ln in text.splitlines() if ln.strip()]
+
+
 def dedupe_repeats(text: str) -> tuple[str, bool]:
     """Collapse a whole-transcript repeat. Returns (text, was_partial_repeat).
 
-    glm-ocr often emits the transcript 2-3x verbatim. When the tail is an exact repeat of the
-    head, dropping it is lossless. When it repeats only PARTIALLY the two copies may differ,
-    and picking one would be a silent guess — so the text is left intact and the caller is
-    told to flag it for a human.
+    glm-ocr often emits the transcript 2-3x. When the repeat is exact, dropping the copies is
+    lossless. When it repeats only PARTIALLY the copies may differ, and picking one would be a
+    silent guess — so the text is left intact and the caller is told to flag it for a human.
     """
     body = text.strip()
     if len(body) < REPEAT_MIN_BLOCK_CHARS * 2:
         return text, False
 
-    # Exact whole-transcript repeat: the string is its own prefix repeated k times.
+    # 1. Exact character-level tiling (the string is its own prefix repeated k times).
     for k in (2, 3, 4):
         if len(body) % k == 0:
             unit = body[: len(body) // k]
             if len(unit) >= REPEAT_MIN_BLOCK_CHARS and unit * k == body:
                 return unit, False
 
-    # Otherwise look for the longest prefix that recurs later in the text. A long recurrence
-    # that does not tile the whole string is a PARTIAL repeat: real content may differ between
-    # the copies, so report it instead of choosing one.
-    head = body[:REPEAT_MIN_BLOCK_CHARS]
-    if body.find(head, REPEAT_MIN_BLOCK_CHARS) != -1:
+    # 2. Line-level tiling — same repeat, but with the copies spaced differently.
+    lines = _content_lines(body)
+    for k in (2, 3, 4):
+        if len(lines) >= k * 2 and len(lines) % k == 0:
+            unit = lines[: len(lines) // k]
+            if unit * k == lines and sum(map(len, unit)) >= REPEAT_MIN_BLOCK_CHARS:
+                return "\n".join(unit), False
+
+    # 3. Partial repeat: the opening text recurs later without tiling the whole thing. Matched
+    #    on whitespace-NORMALIZED characters, which covers both real variants — copies spaced
+    #    differently, and copies glued together so the repeated head is no longer its own line.
+    #    Real content may differ between the copies, so report rather than choose.
+    flat = " ".join(body.split())
+    head = flat[:REPEAT_MIN_BLOCK_CHARS]
+    if len(flat) >= REPEAT_MIN_BLOCK_CHARS * 2 and flat.find(head, REPEAT_MIN_BLOCK_CHARS) != -1:
         return text, True
     return text, False
 
