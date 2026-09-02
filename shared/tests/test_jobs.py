@@ -72,7 +72,7 @@ def test_model_tags_names_both_engines():
     from recipe_pipeline_shared.schema import Recipe
 
     tags = model_tags(Recipe(name="x", ocr_model="glm-ocr:latest", text_model="qwen3.5:4b"))
-    assert tags == ["ocr:glm-ocr", "llm:qwen3.5:4b"]
+    assert tags == ["glm-ocr", "qwen3.5:4b"]
 
 
 def test_model_tags_omitted_for_recipes_processed_before_the_fields_existed():
@@ -90,7 +90,7 @@ def test_model_tags_reflect_the_escalation_engine():
 
     recipe = Recipe(name="x", ocr_model="google/gemini-2.5-flash", text_model="qwen3.5:4b")
     tags = model_tags(recipe)
-    assert tags[0] == "ocr:google/gemini-2.5-flash"
+    assert tags[0] == "google/gemini-2.5-flash"
 
 
 def test_group_tags_no_longer_hardcode_a_person():

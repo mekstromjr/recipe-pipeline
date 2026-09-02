@@ -47,8 +47,8 @@ class Settings(BaseSettings):
     # box; that is wrong for anything uploaded since, and a per-recipe attribution belongs with
     # the recipe (the card's own byline lands in source_curiosities), not in a global default.
     # Set RECIPE_GROUP_TAGS to add a batch label when one genuinely applies.
-    # The models that processed each recipe are tagged separately, from the recipe itself —
-    # see mealie_payload.model_tags.
+    # The models that processed each recipe are tagged separately (bare names, e.g.
+    # "glm-ocr", "qwen3.5:4b"), derived from the recipe itself — see mealie_payload.model_tags.
     group_tags: str = "Scan,recipe-pipeline-v1"
 
     # --- Worker API (#7; the ONE credential the worker holds) ---

@@ -67,18 +67,17 @@ def recipe_to_payload(
 
 
 def model_tags(recipe) -> list[str]:
-    """Tags naming the engines that processed this recipe, e.g. ``ocr:glm-ocr``.
+    """Bare names of the engines that processed this recipe, e.g. ``glm-ocr``, ``qwen3.5:4b``.
 
     Derived from the RECIPE, never from current config: models change (Apple Vision ->
     glm-ocr, gemma4 -> qwen3.5 inside one month), and a recipe must keep saying what
     actually read it. Recipes processed before these fields existed simply get no model tag
     rather than a wrong one.
 
-    The ``ocr:`` / ``llm:`` prefixes group them in Mealie's tag list; the ``:latest`` suffix
-    is dropped because it names no particular version.
+    The ``:latest`` suffix is dropped because it names no particular version.
     """
     tags = []
-    for prefix, value in (("ocr", recipe.ocr_model), ("llm", recipe.text_model)):
+    for value in (recipe.ocr_model, recipe.text_model):
         if value:
-            tags.append(f"{prefix}:{value.removesuffix(':latest')}")
+            tags.append(value.removesuffix(":latest"))
     return tags
