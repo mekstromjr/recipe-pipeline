@@ -64,3 +64,20 @@ def recipe_to_payload(
     if recipe.recipe_yield.value:
         body["recipeYield"] = recipe.recipe_yield.value
     return body
+
+
+def model_tags(recipe) -> list[str]:
+    """Bare names of the engines that processed this recipe, e.g. ``glm-ocr``, ``qwen3.5:4b``.
+
+    Derived from the RECIPE, never from current config: models change (Apple Vision ->
+    glm-ocr, gemma4 -> qwen3.5 inside one month), and a recipe must keep saying what
+    actually read it. Recipes processed before these fields existed simply get no model tag
+    rather than a wrong one.
+
+    The ``:latest`` suffix is dropped because it names no particular version.
+    """
+    tags = []
+    for value in (recipe.ocr_model, recipe.text_model):
+        if value:
+            tags.append(value.removesuffix(":latest"))
+    return tags

@@ -42,8 +42,14 @@ class Settings(BaseSettings):
     # --- Mealie injection target (#8; plain ClusterIP, no Authentik at the Service) ---
     mealie_url: str = "http://mealie.prod.svc.cluster.local:9000"
     mealie_api_token: str | None = None
-    # Fixed tags applied to every injected recipe (filterable batch in Mealie).
-    group_tags: str = "a family member,Scan,recipe-pipeline-v1"
+    # Fixed tags added to EVERY uploaded recipe, so a pipeline batch is filterable in Mealie.
+    # NO PERSON HERE. This defaulted to "a family member" while the corpus was one person's recipe
+    # box; that is wrong for anything uploaded since, and a per-recipe attribution belongs with
+    # the recipe (the card's own byline lands in source_curiosities), not in a global default.
+    # Set RECIPE_GROUP_TAGS to add a batch label when one genuinely applies.
+    # The models that processed each recipe are tagged separately (bare names, e.g.
+    # "glm-ocr", "qwen3.5:4b"), derived from the recipe itself — see mealie_payload.model_tags.
+    group_tags: str = "Scan,recipe-pipeline-v1"
 
     # --- Worker API (#7; the ONE credential the worker holds) ---
     worker_api_key: str | None = None

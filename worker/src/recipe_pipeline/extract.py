@@ -136,6 +136,12 @@ def extract_recipe(
     with _stage("enrich"):
         recipe = enrich_mod.enrich(settings, recipe)
     recipe.page_images = [p.name for p in page_images]
+    # Stamp the engines that actually ran, not the current config: `backend_name` reflects an
+    # --ocr-backend override (the escalate path uses the cloud model).
+    recipe.ocr_model = (
+        settings.openrouter_ocr_model if backend_name == "openrouter" else settings.ocr_model
+    )
+    recipe.text_model = settings.text_model
 
     flags.extend(review.assess_structure(recipe))
     unclear = review.assess_unclear(_recipe_text(recipe))
