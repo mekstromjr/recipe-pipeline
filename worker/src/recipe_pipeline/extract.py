@@ -113,10 +113,26 @@ def extract_recipe(
         )
 
     with _stage("structure"):
-        recipe = structure.structure(
-            settings, ocr_pages=ocr_pages, source_pdf=str(job.pdf_path),
-            verbatim="\n\n".join(ocr_pages),
-        )
+        try:
+            recipe = structure.structure(
+                settings, ocr_pages=ocr_pages, source_pdf=str(job.pdf_path),
+                verbatim="\n\n".join(ocr_pages),
+            )
+        except structure.StructureError as exc:
+            # A model failure must not read as "this card had no ingredients" — that sends a
+            # perfectly good scan to review with a misleading reason. Flag it as its own
+            # failure and keep the batch moving.
+            logger.warning("    structure failed: %s", exc)
+            flags.append(
+                ReviewFlag(
+                    code="structure_failed",
+                    severity="fail",
+                    detail="the model returned unusable output; OCR text is intact",
+                )
+            )
+            recipe = structure.empty_recipe(
+                ocr_pages=ocr_pages, source_pdf=str(job.pdf_path)
+            )
     with _stage("enrich"):
         recipe = enrich_mod.enrich(settings, recipe)
     recipe.page_images = [p.name for p in page_images]

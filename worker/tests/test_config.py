@@ -20,3 +20,22 @@ def test_relative_dirs_anchor_to_repo_root(monkeypatch):
     s = Settings(_env_file=None)
     assert s.outbox == PROJECT_ROOT / "output"
     assert s.inbox == PROJECT_ROOT / "inbox"
+
+
+def test_ollama_schema_marks_content_fields_required():
+    """Ollama's `format` is constrained decoding: with no `required`, `{}` validates and
+    qwen3.5:4b emits it. Measured — a perfect transcript yielded an almost-empty object."""
+    from recipe_pipeline.structure import REQUIRED_FIELDS, _ollama_schema
+
+    schema = _ollama_schema()
+    assert schema["required"] == REQUIRED_FIELDS
+    for field in ("name", "ingredients", "instructions"):
+        assert field in schema["required"]
+
+
+def test_ollama_schema_does_not_mutate_the_model_schema():
+    """The pydantic model must stay lenient for PARSING; only the sent schema is strict."""
+    from recipe_pipeline.structure import StructuredCard, _ollama_schema
+
+    _ollama_schema()
+    assert "required" not in StructuredCard.model_json_schema()
