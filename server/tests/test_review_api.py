@@ -218,3 +218,4 @@ def test_status_summary(env):
     s = client.get("/api/status").json()
     assert s["counts"] == {"needs_review": 1, "uploaded": 1}
     assert s["recent"][0]["by"] == "michael"
+

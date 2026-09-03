@@ -27,6 +27,12 @@
   .pg img{max-width:100%;border-radius:6px;box-shadow:0 2px 12px #0008;transition:transform .15s ease}
   #edit{width:46%;flex:0 0 46%;border-left:1px solid var(--line);overflow:auto;padding:18px 20px}
   .row{margin-bottom:14px} label{display:block;color:var(--mut);font-size:12px;margin-bottom:4px;text-transform:uppercase;letter-spacing:.03em}
+  /* Yield + the three times share a row: four short values do not each deserve full width. */
+  .grid4{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+  @media(min-width:720px){.grid4{grid-template-columns:repeat(4,1fr)}}
+  /* Marks a value the MODEL guessed. The reviewer should scrutinise an estimate and can
+     take a transcription at face value, so the two must not look identical. */
+  .est{color:var(--warn,#c98a2b);text-transform:none;letter-spacing:0;font-weight:600}
   input,textarea{width:100%;background:#12141a;border:1px solid var(--line);color:var(--fg);border-radius:6px;padding:8px 10px;font:inherit;resize:vertical}
   textarea{min-height:120px;font-family:ui-monospace,Menlo,monospace;font-size:13px}
   #name{font-size:17px;font-weight:600}
@@ -174,7 +180,15 @@ async function openRecipe(i){
     <div class="row"><label>Description</label><input id="desc" value="${esc(r.description)}"></div>
     <div class="row"><label>Ingredients (one per line)</label><textarea id="ings">${esc(r.ingredients.join('\n'))}</textarea></div>
     <div class="row"><label>Instructions (one per line / step)</label><textarea id="insts">${esc(r.instructions.join('\n'))}</textarea></div>
+    <div class="row grid4">
+      ${tf('yield','recipe_yield',r)}${tf('servings','servings',r)}
+      ${tf('prep','prep_time',r)}${tf('cook','cook_time',r)}
+    </div>
+    <div class="row"><label>Total time ${prov(r.total_time)}</label><input id="f_total_time" value="${esc(r.total_time.value)}"></div>
+    <div class="row"><label>From the card, not the recipe (attributions, notes, warnings)</label>
+      <textarea id="curios">${esc(r.source_curiosities)}</textarea></div>
     <details><summary>verbatim OCR (what was actually scanned)</summary><pre>${esc(r.verbatim||'(none)')}</pre></details>
+    <div class="hint">read by ${esc(r.ocr_model||'?')} &middot; structured by ${esc(r.text_model||'?')}</div>
     <div class="hint">Approve sends it to Mealie. Reject = not a recipe (permanent). Arrows just move on; edits auto-save.</div>
     <div class="bar">
       <button class="nav" onclick="openRecipe(cur-1)">&larr;</button>
@@ -205,9 +219,21 @@ function applyRot(box){
   }
 }
 
+// "estimated" is the only provenance worth flagging: it is the one the model guessed.
+// from_card is a transcription and human is someone's own earlier edit — neither needs a warning.
+function prov(f){return f&&f.provenance==='estimated'?'<span class="est">(estimated)</span>':'';}
+function tf(label,key,r){return `<div><label>${label} ${prov(r[key])}</label>`+
+  `<input id="f_${key}" value="${esc(r[key].value)}"></div>`;}
+
 function payload(){return{name:$('#name').value, description:$('#desc').value,
   ingredients:$('#ings').value.split('\n').map(s=>s.trim()).filter(Boolean),
-  instructions:$('#insts').value.split('\n').map(s=>s.trim()).filter(Boolean)};}
+  instructions:$('#insts').value.split('\n').map(s=>s.trim()).filter(Boolean),
+  // Sent as strings, always: "" means CLEAR this field, and omitting it would mean
+  // "leave alone" server-side. The two are different and the form must be explicit.
+  servings:$('#f_servings').value, recipe_yield:$('#f_recipe_yield').value,
+  prep_time:$('#f_prep_time').value, cook_time:$('#f_cook_time').value,
+  total_time:$('#f_total_time').value,
+  source_curiosities:$('#curios').value};}
 
 async function save(silent){
   const id=loadedId;

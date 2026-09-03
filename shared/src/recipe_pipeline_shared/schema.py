@@ -19,6 +19,11 @@ class Provenance(StrEnum):
     FROM_CARD = "from_card"  # transcribed from the scan (authoritative)
     ENRICHED = "enriched"  # added from a web source (e.g. dish history, cuisine)
     ESTIMATED = "estimated"  # inferred/guessed by a model (e.g. cook time not on the card)
+    # Typed by a person in the review UI. Authoritative like FROM_CARD — and deliberately
+    # NOT the same value: a reviewer entering a yield is not the card saying it, and the
+    # whole point of this enum is keeping "what was on the card" separate from "what was
+    # added". Excluded from estimated_fields() because a human edit is not a model guess.
+    HUMAN = "human"
 
 
 class Ingredient(BaseModel):
@@ -78,7 +83,12 @@ class Recipe(BaseModel):
     page_images: list[str] = Field(default_factory=list)  # rendered page image paths
 
     def estimated_fields(self) -> list[str]:
-        """Names of timing/yield fields that were model-estimated rather than read from the card."""
+        """Names of timing/yield fields that were model-estimated.
+
+        Human edits (``Provenance.HUMAN``) are NOT listed: the Mealie ``ai_estimated_fields``
+        extra and the import note both derive from this, and flagging a value a person typed
+        as AI-estimated would be a lie to the reader.
+        """
         out: list[str] = []
         for fname in ("servings", "recipe_yield", "prep_time", "cook_time", "total_time"):
             f: Field_ = getattr(self, fname)
