@@ -16,7 +16,14 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 from recipe_pipeline_shared.jobs import InvalidTransition, JobStatus, ensure_transition
 from recipe_pipeline_shared.jobs import Job as JobDTO
-from recipe_pipeline_shared.schema import Ingredient, Recipe, ReviewReport, Step
+from recipe_pipeline_shared.schema import (
+    Field_,
+    Ingredient,
+    Provenance,
+    Recipe,
+    ReviewReport,
+    Step,
+)
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -41,6 +48,13 @@ class QueueItem(BaseModel):
     flags: list[str]
 
 
+class TimedField(BaseModel):
+    """A yield/timing value plus where it came from, so the editor can show provenance."""
+
+    value: str = ""
+    provenance: Provenance | None = None
+
+
 class RecipeDetail(BaseModel):
     id: str
     status: JobStatus
@@ -48,6 +62,19 @@ class RecipeDetail(BaseModel):
     description: str
     ingredients: list[str]
     instructions: list[str]
+    # Yield/timing carry provenance: the UI marks a model ESTIMATE differently from something
+    # read off the card, because a reviewer should scrutinise a guess and not a transcription.
+    servings: TimedField
+    recipe_yield: TimedField
+    prep_time: TimedField
+    cook_time: TimedField
+    total_time: TimedField
+    # Off-recipe text the card carried (attributions, family notes, warnings). Free text, and
+    # shown as such — it is one blob by design, not structured sub-fields.
+    source_curiosities: str
+    # Read-only context: which engines produced this extraction.
+    ocr_model: str | None
+    text_model: str | None
     verbatim: str
     confidence: float | None
     flags: list[str]
@@ -58,12 +85,45 @@ class RecipeDetail(BaseModel):
 
 
 class RecipeEdit(BaseModel):
-    """Fields the editor exposes. Everything else in the stored Recipe is preserved."""
+    """Fields the editor exposes. Everything else in the stored Recipe is preserved.
+
+    Every field is optional and ``None`` means "not submitted, leave alone" — an empty STRING
+    is a real edit meaning "clear this". The two must stay distinguishable or a form that
+    posts only the fields it changed would wipe the rest.
+    """
 
     name: str | None = None
     description: str | None = None
     ingredients: list[str] | None = None
     instructions: list[str] | None = None
+    servings: str | None = None
+    recipe_yield: str | None = None
+    prep_time: str | None = None
+    cook_time: str | None = None
+    total_time: str | None = None
+    source_curiosities: str | None = None
+
+
+def _timed(f: Field_) -> TimedField:
+    return TimedField(value=f.value or "", provenance=f.provenance if f.value else None)
+
+
+def _apply_timed(current: Field_, submitted: str | None) -> Field_:
+    """Apply an editor value to a yield/timing field.
+
+    ``None`` means the form did not submit this field — leave it, provenance and all. A
+    submitted value is marked HUMAN: it is authoritative but it is NOT the card speaking, and
+    it must not be reported as an AI estimate. An empty string clears the field, and a cleared
+    field carries no provenance because there is nothing to attribute.
+    """
+    if submitted is None:
+        return current
+    text = submitted.strip()
+    if not text:
+        return Field_()
+    if text == (current.value or ""):
+        return current  # unchanged; do not relabel provenance for a no-op edit
+    return Field_(value=text, provenance=Provenance.HUMAN)
 
 
 def _review(row: RecipeRow) -> ReviewReport | None:
@@ -138,6 +198,14 @@ async def get_recipe(job_id: str, session: AsyncSession = SessionDep) -> RecipeD
         description=recipe.description or "",
         ingredients=[i.text for i in recipe.ingredients],
         instructions=[s.text for s in recipe.instructions],
+        servings=_timed(recipe.servings),
+        recipe_yield=_timed(recipe.recipe_yield),
+        prep_time=_timed(recipe.prep_time),
+        cook_time=_timed(recipe.cook_time),
+        total_time=_timed(recipe.total_time),
+        source_curiosities=recipe.source_curiosities or "",
+        ocr_model=recipe.ocr_model,
+        text_model=recipe.text_model,
         verbatim=recipe.original_transcription or "",
         confidence=review.confidence if review else None,
         flags=sorted({f.code for f in review.flags}) if review else [],
@@ -177,6 +245,13 @@ async def edit_recipe(
         recipe.ingredients = [Ingredient(text=t) for t in edit.ingredients if t.strip()]
     if edit.instructions is not None:
         recipe.instructions = [Step(text=t) for t in edit.instructions if t.strip()]
+    recipe.servings = _apply_timed(recipe.servings, edit.servings)
+    recipe.recipe_yield = _apply_timed(recipe.recipe_yield, edit.recipe_yield)
+    recipe.prep_time = _apply_timed(recipe.prep_time, edit.prep_time)
+    recipe.cook_time = _apply_timed(recipe.cook_time, edit.cook_time)
+    recipe.total_time = _apply_timed(recipe.total_time, edit.total_time)
+    if edit.source_curiosities is not None:
+        recipe.source_curiosities = edit.source_curiosities.strip() or None
     # Reassign (not mutate) so SQLAlchemy sees the JSONB change.
     job.recipe.data = recipe.model_dump(mode="json")
     await session.commit()
