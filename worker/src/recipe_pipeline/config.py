@@ -25,13 +25,13 @@ class Settings(BaseSettings):
 
     # --- Models: CPU Ollama in <ct>, NOT this Mac ---
     # <ct> has moved hosts twice (<pve-host> -> <pve-host> 2026-08-26 -> <pve-host>). It keeps the static
-    # address <lan-ip> and the name `ollama.meklab.net` across moves, so prefer the NAME
+    # static LAN address and the name `ollama.meklab.net` across moves, so prefer the NAME
     # and re-check the host's specs (cores, memory cap) rather than assuming they carried over.
     # The worker runs in-cluster and reaches it over the LAN, same as scribe. Ollama ships no
     # authentication, so 11434 is restricted to the k3s nodes by iptables INPUT rules inside
     # the CT — a laptop CANNOT reach it, and neither can the PVE host it runs on.
     # For local development, tunnel THROUGH A K3S NODE and override:
-    #   ssh -N -L 11500:<lan-ip>:11434 mekadmin@<lan-ip>
+    #   ssh -N -L 11500:ollama.meklab.net:11434 <user>@<k3s-node>
     #   RECIPE_OLLAMA_HOST=http://127.0.0.1:11500 uv run recipe-pipeline extract
     # Do NOT tunnel to local port 11434: a dev Mac running its own native ollama binds IPv4
     # 127.0.0.1 while the forward binds IPv6 [::1], so "localhost:11434" resolves to either
@@ -91,7 +91,7 @@ class Settings(BaseSettings):
     mealie_url: str = "http://localhost:9000"
     mealie_api_token: str | None = None
     # Fixed tags added to EVERY uploaded recipe, so a pipeline batch is filterable in Mealie.
-    # NO PERSON HERE. This defaulted to "a family member" while the corpus was one person's recipe
+    # NO PERSON HERE. This defaulted to a person's name while the corpus was one person's recipe
     # box; that is wrong for anything uploaded since, and a per-recipe attribution belongs with
     # the recipe (the card's own byline lands in source_curiosities), not in a global default.
     # Set RECIPE_GROUP_TAGS to add a batch label when one genuinely applies.

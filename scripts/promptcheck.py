@@ -11,7 +11,7 @@ quietly regressing another is the failure this exists to catch — the cheese an
 were silently DROPPING their attributions and nobody noticed until this was run.
 
 Needs a reachable ollama; from a laptop:
-    ssh -N -L 11500:<lan-ip>:11434 mekadmin@<lan-ip>
+    ssh -N -L 11500:ollama.meklab.net:11434 <user>@<k3s-node>
     RECIPE_OLLAMA_HOST=http://127.0.0.1:11500 uv run --no-sync python scripts/promptcheck.py
 """
 import pathlib
