@@ -94,7 +94,8 @@ def test_model_tags_reflect_the_escalation_engine():
 
 
 def test_group_tags_no_longer_hardcode_a_person():
-    """"a family member" was right for one recipe box and wrong for everything uploaded since."""
+    """The default once held a person's name (right for one recipe box, wrong for everything uploaded since)."""
     from recipe_pipeline.config import Settings
 
-    assert "a family member" not in Settings(_env_file=None).group_tags
+    tags = Settings(_env_file=None).group_tags
+    assert tags == "Scan,recipe-pipeline-v1", tags

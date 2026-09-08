@@ -101,7 +101,7 @@ For laptop development <pve-host> is still unreachable, and scribe's documented 
 longer applies since <pve-host> is not a k8s Service. Use an SSH tunnel on **local port 11500**:
 
 ```bash
-ssh -N -L 11500:<lan-ip>:11434 root@<lan-ip>
+ssh -N -L 11500:ollama.meklab.net:11434 root@<pve-host>
 ```
 
 ## Host contention with scribe — MEASURED, and it changes step 6

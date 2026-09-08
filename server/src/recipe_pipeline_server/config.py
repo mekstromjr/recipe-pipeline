@@ -43,7 +43,7 @@ class Settings(BaseSettings):
     mealie_url: str = "http://mealie.prod.svc.cluster.local:9000"
     mealie_api_token: str | None = None
     # Fixed tags added to EVERY uploaded recipe, so a pipeline batch is filterable in Mealie.
-    # NO PERSON HERE. This defaulted to "a family member" while the corpus was one person's recipe
+    # NO PERSON HERE. This defaulted to a person's name while the corpus was one person's recipe
     # box; that is wrong for anything uploaded since, and a per-recipe attribution belongs with
     # the recipe (the card's own byline lands in source_curiosities), not in a global default.
     # Set RECIPE_GROUP_TAGS to add a batch label when one genuinely applies.
