@@ -1,4 +1,4 @@
-"""Command-line entrypoint: ``recipe-pipeline {extract,upload,bakeoff}``."""
+"""Command-line entrypoint: ``recipe-pipeline {extract,review,upload,work,bakeoff}``."""
 
 from __future__ import annotations
 
@@ -29,15 +29,6 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Reprocess recipes even if output/<slug>/recipe.json already exists.",
     )
     p_extract.set_defaults(func=_cmd_extract)
-
-    p_escalate = sub.add_parser(
-        "escalate",
-        help="Re-OCR FAILED recipes with the cloud vision model (better at hard cursive).",
-    )
-    p_escalate.add_argument(
-        "--limit", type=int, default=None, help="Escalate at most N failed recipes."
-    )
-    p_escalate.set_defaults(func=_cmd_escalate)
 
     p_review = sub.add_parser(
         "review", help="Open the local review UI to work through the needs_review queue."
@@ -84,13 +75,6 @@ def _cmd_review(args: argparse.Namespace) -> int:
     from recipe_pipeline import review_server
 
     review_server.serve(load_settings(), port=args.port)
-    return 0
-
-
-def _cmd_escalate(args: argparse.Namespace) -> int:
-    from recipe_pipeline import extract
-
-    extract.escalate(load_settings(), limit=args.limit)
     return 0
 
 

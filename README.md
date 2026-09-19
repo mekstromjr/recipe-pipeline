@@ -63,46 +63,28 @@ Drop scanned PDFs (one per recipe) into `inbox/`, then:
 uv run recipe-pipeline extract            # all of inbox/ -> reviewed output/<slug>/
 uv run recipe-pipeline extract --limit 20 # sample batch (process 20 new recipes)
 uv run recipe-pipeline extract --force    # reprocess everything (default: skip already-done)
-uv run recipe-pipeline escalate           # re-OCR the FAILED tail with cloud vision (hard cursive)
 uv run recipe-pipeline review             # local UI: work the needs_review queue (scan + edit + approve)
 # ...then upload (ok recipes auto-upload; needs_review upload once approved in the review UI)
 ```
 
-### Nightly batches (avoid one 12-hour run)
+### Batch processing
 
-A whole-corpus run is long, so process it ~50/night via a `launchd` agent (macOS). The pipeline
-is resumable (already-done recipes are skipped), so each run just advances the next batch.
-
-```bash
-# Point input at your scans folder (process in place), then install the agent:
-#   RECIPE_INPUT_DIR=/path/to/scansDocuments   (in .env)
-cp scripts/net.meklab.recipe-pipeline.plist ~/Library/LaunchAgents/
-launchctl load -w ~/Library/LaunchAgents/net.meklab.recipe-pipeline.plist   # runs 01:00 nightly
-# So it runs even if the Mac is asleep (needs sudo + plugged in):
-sudo pmset repeat wake MTWRFSU 00:55:00
-```
-
-`scripts/nightly-batch.sh` runs `extract --limit 50` then `escalate --limit 50` under
-`caffeinate` (no idle-sleep mid-batch); progress logs to `output/nightly.log`. Requires Ollama.
-Disable with `launchctl unload …` and `sudo pmset repeat cancel`.
-
-**Upload runs separately, during the day.** The LAN route to the k3s API is unreliable right
-after the overnight sleep/wake (the Mac is dual-homed wired+wireless on the subnet and Tailscale
-also routes it), so uploading at 1am fails. Instead a second agent
-(`net.meklab.recipe-pipeline-upload`, `scripts/upload-batch.sh`) runs at 9/12/15/18/21h: it
-checks the cluster is reachable, and if so uploads the **high-confidence (`ok`)** recipes
-(`needs_review` stays manual). It's a clean no-op when unreachable, and idempotent (per-recipe
-`.uploaded` markers), so the backlog self-heals on whichever slot the route is healthy.
-
-```bash
-cp scripts/net.meklab.recipe-pipeline-upload.plist ~/Library/LaunchAgents/
-launchctl load -w ~/Library/LaunchAgents/net.meklab.recipe-pipeline-upload.plist
-```
+> **Retired 2026-09-18.** This repo used to ship a macOS `launchd` pair that ran
+> `extract --limit 50` + `escalate --limit 50` at 01:00 nightly, plus a daytime upload agent,
+> with `sudo pmset repeat wake` to wake the Mac for it. **That was an artifact of early
+> development.** The pipeline now runs entirely in the k3s cluster: `recipe-service` takes
+> uploads and `recipe-worker` claims jobs continuously, so there is nothing to schedule and
+> nothing to keep a laptop awake for. `scripts/nightly-batch.sh`, `scripts/upload-batch.sh`,
+> both plists and the `escalate` CLI command were deleted rather than left to rot.
+>
+> The local `extract` / `review` / `upload` commands still exist for working a corpus on a
+> Mac by hand, but the hosted service is the supported path.
 
 **Cloud escalation (hard cursive).** Apple Vision can't reliably read difficult handwriting (and
 a local VLM *fabricates* on it — dangerous). So failed cards escalate to a strong cloud vision
-model (`escalate`), which reads cursive far better. This is the only stage that sends a scan
-off-device, and only for the failed tail; results still pass the review gate. Set
+model, which reads cursive far better. The worker does this automatically: a FAILED local pass
+gets one shot with the cloud OCR before failure is accepted (`pull.py`). This is the only stage
+that sends a scan off-device, and only for the failed tail; results still pass the review gate. Set
 `RECIPE_OPENROUTER_API_KEY` (copy from `.env`). On a sample, escalating the failed tail
 roughly doubled the usable rate.
 
@@ -158,5 +140,5 @@ server member, so it never pulls the worker's Apple Vision deps. Full design: re
 | `worker/src/recipe_pipeline/extract.py` | end-to-end batch orchestration (resumable; manifest) |
 | `worker/src/recipe_pipeline/review_server.py` | current local review UI (superseded by the hosted server in #9) |
 | `worker/src/recipe_pipeline/mealie.py` | Mealie API client (migrates server-side in #7) |
-| `worker/src/recipe_pipeline/cli.py` | `extract` / `escalate` / `review` / `upload` / `bakeoff` commands |
+| `worker/src/recipe_pipeline/cli.py` | `extract` / `review` / `upload` / `work` / `bakeoff` commands |
 | `server/` (`recipe-pipeline-server`) | FastAPI control plane (scaffold; built in #4–#8) — NO Apple Vision deps |

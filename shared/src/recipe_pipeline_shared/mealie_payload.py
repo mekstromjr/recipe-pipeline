@@ -27,9 +27,19 @@ def _times(recipe: Recipe) -> dict[str, Any]:
 
 
 def recipe_to_payload(
-    recipe: Recipe, *, tags: list[dict], categories: list[dict]
+    recipe: Recipe,
+    *,
+    tags: list[dict],
+    categories: list[dict],
+    ingredients: list[dict] | None = None,
 ) -> dict[str, Any]:
-    """``tags``/``categories`` are pre-resolved Mealie organizer objects ({id,name,slug})."""
+    """``tags``/``categories`` are pre-resolved Mealie organizer objects ({id,name,slug}).
+
+    ``ingredients`` are pre-parsed Mealie ingredient objects (see
+    ``MealieClient.parse_ingredients``). When omitted, every line is sent as one opaque note —
+    the old behaviour, which left a human to run edit -> parse -> select in the Mealie UI for
+    each recipe.
+    """
     notes = []
     if recipe.source:
         notes.append({"title": "Source", "text": recipe.source})
@@ -49,7 +59,11 @@ def recipe_to_payload(
 
     body: dict[str, Any] = {
         "description": recipe.description or (recipe.dish_history or ""),
-        "recipeIngredient": [{"note": i.text, "quantity": 0} for i in recipe.ingredients],
+        "recipeIngredient": (
+            ingredients
+            if ingredients is not None
+            else [{"note": i.text, "quantity": 0} for i in recipe.ingredients]
+        ),
         "recipeInstructions": [
             {"text": s.text, "title": "", "summary": "", "ingredientReferences": []}
             for s in recipe.instructions
@@ -58,7 +72,10 @@ def recipe_to_payload(
         "tags": tags,
         "notes": notes,
         "extras": {k: v for k, v in extras.items() if v not in (None, [], "")},
-        "settings": {"disableAmount": True},
+        # disableAmount is per-recipe and gates whether Mealie renders structured amounts at
+        # all. Forcing True is what made parsed ingredients pointless; it is now True only
+        # when nothing was parsed, so an unparsed import still displays exactly as before.
+        "settings": {"disableAmount": ingredients is None},
         **_times(recipe),
     }
     if recipe.recipe_yield.value:

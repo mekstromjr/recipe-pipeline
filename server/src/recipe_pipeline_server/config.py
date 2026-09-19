@@ -32,6 +32,16 @@ class Settings(BaseSettings):
     # Absolute wall-clock budget for ONE dependency check on /statusz.
     dep_check_timeout: float = 5.0
 
+    # Below this, Mealie's ingredient parse is discarded and the row falls back to a plain
+    # note holding the whole string. 0.90 is MICHAEL'S CHOICE, not a measured optimum.
+    #
+    # It matters because the parser rewrites wording on OCR'd handwriting: measured, "20 large
+    # marshmellows" parsed to the food "marshmallow" (spelling silently corrected) and "1 8 oz
+    # pkg. Pecan nuts" to the food "pkg." with "Pecan nuts" pushed into the note. A low-scoring
+    # parse is worse than no parse, because unparsed text is merely unstructured while a bad
+    # parse is wrong. `originalText` always carries the card's verbatim string regardless.
+    ingredient_parse_min_confidence: float = 0.90
+
     # --- Garage S3 (`recipes` bucket; path-style, region `meklab`) ---
     s3_endpoint: str = "http://garage-s3.infra.svc.cluster.local:3900"
     s3_region: str = "meklab"
