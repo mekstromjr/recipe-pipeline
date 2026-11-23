@@ -94,7 +94,10 @@ def test_model_tags_reflect_the_escalation_engine():
 
 
 def test_group_tags_no_longer_hardcode_a_person():
-    """The default once held a person's name (right for one recipe box, wrong for everything uploaded since)."""
+    """The default once held a person's name.
+
+    Right for one recipe box, wrong for everything uploaded since.
+    """
     from recipe_pipeline.config import Settings
 
     tags = Settings(_env_file=None).group_tags

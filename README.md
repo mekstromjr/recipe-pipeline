@@ -85,7 +85,7 @@ a local VLM *fabricates* on it — dangerous). So failed cards escalate to a str
 model, which reads cursive far better. The worker does this automatically: a FAILED local pass
 gets one shot with the cloud OCR before failure is accepted (`pull.py`). This is the only stage
 that sends a scan off-device, and only for the failed tail; results still pass the review gate. Set
-`RECIPE_OPENROUTER_API_KEY` (copy from `.env`). On a sample, escalating the failed tail
+`RECIPE_OPENROUTER_API_KEY` in `.env`. On a sample, escalating the failed tail
 roughly doubled the usable rate.
 
 ## Mealie API mapping (verified against the live v3.19.1 instance)
