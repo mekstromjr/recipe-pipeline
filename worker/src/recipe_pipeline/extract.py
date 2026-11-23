@@ -1,6 +1,6 @@
 """End-to-end extraction: scanned recipe PDFs -> reviewed recipe output under ``output/``.
 
-Per-recipe flow:  render -> OCR (glm-ocr, <ct>) -> structure -> enrich -> review.
+Per-recipe flow:  render -> OCR (glm-ocr, CPU Ollama) -> structure -> enrich -> review.
 Significant failures are HELD; minor issues upload with an Import Software Note.
 No Mealie upload (recipes are bulk-imported manually). A run logs per-stage progress to the
 console and ``output/run.log`` and writes a summary ``output/_manifest.json``.

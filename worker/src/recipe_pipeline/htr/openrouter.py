@@ -7,7 +7,7 @@ is the ONLY stage that sends a scan off-device, and only for the failed tail.
 Cloud VLMs can still fabricate on truly-illegible text, so escalated recipes still pass through
 the same structure + review gate, and the verbatim transcription is preserved.
 
-Requires ``RECIPE_OPENROUTER_API_KEY`` (copy the value from .env's OPEN_ROUTER_KEY).
+Requires ``RECIPE_OPENROUTER_API_KEY``.
 """
 
 from __future__ import annotations
@@ -39,8 +39,8 @@ class OpenRouterVisionBackend:
     def __init__(self, settings: Settings) -> None:
         if not settings.openrouter_api_key:
             raise NotImplementedError(
-                "OpenRouter backend needs RECIPE_OPENROUTER_API_KEY (copy OPEN_ROUTER_KEY from "
-                ".env into recipe-pipeline/.env)."
+                "OpenRouter backend needs RECIPE_OPENROUTER_API_KEY "
+                "(set it in recipe-pipeline/.env)."
             )
         self.settings = settings
 

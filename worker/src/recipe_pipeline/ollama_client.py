@@ -1,4 +1,4 @@
-"""Client for the CPU Ollama in <ct> (`ollama.meklab.net`).
+"""Client for the CPU Ollama host (`ollama.meklab.net`).
 
 Ported back from `scribe`, whose own client header records that it was adapted FROM this
 file — scribe then ran glm-ocr + qwen3.5:4b in production and learned things this pipeline
@@ -36,7 +36,8 @@ class OllamaError(RuntimeError):
     """Any failure talking to Ollama, with the host in the message.
 
     The host matters in the message: the most common misconfiguration is pointing at a
-    laptop's own ollama instead of <ct>, which fails in confusing ways rather than loudly.
+    laptop's own ollama instead of the shared host, which fails in confusing ways rather
+    than loudly.
     """
 
 

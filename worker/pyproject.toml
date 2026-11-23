@@ -1,7 +1,7 @@
 [project]
 name = "recipe-pipeline-worker"
 version = "0.1.0"
-description = "Worker: render PDF -> glm-ocr (<pve-host>) -> structure -> enrich -> review."
+description = "Worker: render PDF -> glm-ocr (CPU Ollama) -> structure -> enrich -> review."
 requires-python = ">=3.12"
 dependencies = [
     "recipe-pipeline-shared",

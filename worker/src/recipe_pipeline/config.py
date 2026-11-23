@@ -23,8 +23,8 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # --- Models: CPU Ollama in <ct>, NOT this Mac ---
-    # <ct> has moved hosts twice (<pve-host> -> <pve-host> 2026-08-26 -> <pve-host>). It keeps the static
+    # --- Models: CPU Ollama in a Proxmox container, NOT this Mac ---
+    # The container has moved between hosts more than once. It keeps the static
     # static LAN address and the name `ollama.meklab.net` across moves, so prefer the NAME
     # and re-check the host's specs (cores, memory cap) rather than assuming they carried over.
     # The worker runs in-cluster and reaches it over the LAN, same as scribe. Ollama ships no
@@ -52,10 +52,10 @@ class Settings(BaseSettings):
     # pool from HOST core count and ignores the container's cgroup quota, so it oversubscribes
     # and the threads fight CFS throttling. Pinning to the real limit measured +73% generation.
     # There is no server-side env var — it is a per-request option, so EVERY call must send it.
-    # Must equal the CT's `cores` (3 as of the <pve-host> move; it was also 3 on <pve-host>). llama.cpp
+    # Must equal the CT's `cores` (3 as of the last host move). llama.cpp
     # sizes its pool from HOST core count and ignores the cgroup, so an unset value
-    # oversubscribes. Verify against `pct config <ctid>` after any host move — this is a per-request
-    # option with no server-side equivalent, so every caller must send it.
+    # oversubscribes. Verify against the container config after any host move. This is a
+    # per-request option with no server-side equivalent, so every caller must send it.
     num_thread: int = 3
 
     # Longest-edge cap for page images sent to the vision model. Full-resolution renders cost
@@ -67,7 +67,7 @@ class Settings(BaseSettings):
     # generous while still bounding a degenerate generation.
     ocr_num_predict: int = 2048
 
-    # Per-request ceiling. Measured on <pve-host> with the host otherwise idle, one page of OCR is
+    # Per-request ceiling. Measured with the host otherwise idle, one page of OCR is
     # ~39s warm; a cold load after a model swap adds tens of seconds more. Under contention
     # with scribe it has been observed at 445-839s (see docs/redesign-v2-plan.md), because
     # ollama serializes across clients. This is a runaway backstop, not an expected duration.
@@ -103,13 +103,13 @@ class Settings(BaseSettings):
     def group_tag_list(self) -> list[str]:
         return [t.strip() for t in self.group_tags.split(",") if t.strip()]
 
-    # --- OCR backend (single engine). glm-ocr in <ct>; `openrouter` stays registered for
+    # --- OCR backend (single engine). glm-ocr on the Ollama host; `openrouter` stays registered for
     # the escalation path but is not used by default.
     ocr_backend: str = "glmocr"
 
     # --- Cloud escalation (the `escalate` command): re-OCR FAILED cards with a strong cloud
     # vision model that reads hard cursive far better. The only stage that leaves the machine.
-    openrouter_api_key: str | None = None  # copy OPEN_ROUTER_KEY from .env
+    openrouter_api_key: str | None = None  # an OpenRouter API key
     openrouter_ocr_model: str = "google/gemini-2.5-flash"
 
     # --- Directories (resolved relative to the project root if not absolute) ---

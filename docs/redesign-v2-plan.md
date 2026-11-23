@@ -1,11 +1,11 @@
-# recipe-pipeline v2 — plan (<pve-host> Ollama, Apple Vision removed)
+# recipe-pipeline v2 — plan (CPU Ollama, Apple Vision removed)
 
 Status: APPROVED-PENDING (Q1-Q3 answered). Supersedes the Mac-bound v1 flow.
 
 ## Goal
 
-Free the Mac and simplify. All inference moves to the CPU Ollama on **<pve-host>**
-(`http://ollama.meklab.net:11434`, <ct> on **<pve-host>**). Apple Vision is removed; **glm-ocr** becomes the
+Free the Mac and simplify. All inference moves to the CPU Ollama host
+(`http://ollama.meklab.net:11434`, a Proxmox container). Apple Vision is removed; **glm-ocr** becomes the
 OCR engine and **qwen3.5:4b** does structuring and QA. Speed is explicitly not a constraint.
 
 ## Decisions taken
@@ -38,7 +38,7 @@ native ollama binds `127.0.0.1`) — use 11500.
 Note: scribe's *code default* still points at `ollama-mini.infra.svc.cluster.local`, which no
 longer exists — the live Deployment overrides it by env. Worth a small follow-up on scribe.
 
-## Measured on <pve-host> (against `samples/` ground truth)
+## Measured on the first Ollama host (against `samples/` ground truth)
 
 | Finding | Evidence |
 |---|---|
@@ -82,9 +82,9 @@ the cheap deterministic checks stay.
    against Apple Vision. Re-check against glm-ocr. Keep the LLM confidence pass (decision 2),
    repointed at qwen3.5:4b via `chat_structured`.
 
-6. **Batch by stage.** <pve-host> runs `OLLAMA_MAX_LOADED_MODELS: "1"`; alternating models per card
+6. **Batch by stage.** The Ollama host runs `OLLAMA_MAX_LOADED_MODELS: "1"`; alternating models per card
    costs a ~30s swap twice per recipe. OCR the whole batch, then structure the whole batch.
-   Raising that setting is not an option — it caused the 2026-08-19 <k3s-server> outage.
+   Raising that setting is not an option — it caused a 2026-08-19 cluster outage.
 
 7. **Containerize + CI.** Extend the Dockerfile with a worker image, enable `test:worker` in
    `.gitlab-ci.yml` (currently skipped: "worker is macOS-only"), and add the k8s Deployment with
@@ -97,8 +97,8 @@ the cheap deterministic checks stay.
 ## Dev-time connectivity
 
 Containerizing dissolves the firewall question in production (k3s nodes are already permitted).
-For laptop development <pve-host> is still unreachable, and scribe's documented port-forward no
-longer applies since <pve-host> is not a k8s Service. Use an SSH tunnel on **local port 11500**:
+For laptop development the Ollama host is still unreachable, and scribe's documented port-forward no
+longer applies since the Ollama host is not a k8s Service. Use an SSH tunnel on **local port 11500**:
 
 ```bash
 ssh -N -L 11500:ollama.meklab.net:11434 root@<pve-host>
@@ -129,7 +129,7 @@ behind scribe's in-flight map chunk, plus a glm-ocr <-> qwen3.5 swap each way of
 * **Not swap thrash.** `vmstat` shows `si/so = 0`; the 2.7 GB in swap is stale from an earlier
   incident. llama-server sits at ~3 cores, exactly its `cores=3` cap.
 * **Not memory pressure from this pipeline.** llama-server RSS 4.2 GB matches the documented
-  resident size. (<pve-host> also runs a Firefox kiosk at ~1.7 GB — expected; it is the console node.)
+  resident size. (The host also runs a ~1.7 GB browser kiosk — expected.)
 
 ### Consequence
 
@@ -146,8 +146,8 @@ not cross-service swapping. Options, preferred first:
 2. **Accept it** — batches simply run 8-14x slower whenever scribe is busy. Viable, but the
    numbers belong in the README so it is not a surprise later.
 3. **Raise `OLLAMA_MAX_LOADED_MODELS` to 2** — NOT recommended. Explicitly ruled out by the
-   ollama README; it caused the 2026-08-19 <k3s-server> outage, and <pve-host> has less headroom
-   than <pve-host> did.
+   ollama README; it caused a 2026-08-19 cluster outage, and the current host has less headroom
+   than the first one did.
 
 **Benchmark hygiene**: check `kubectl -n infra logs deploy/scribe --tail=5` and
 `pct exec <ctid> -- ollama ps` before timing anything on this host. A number taken during a scribe
