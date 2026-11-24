@@ -1,144 +1,174 @@
 # recipe-pipeline
 
-> **Read-only mirror.** This project is developed on a self-hosted GitLab instance and
-> mirrored to GitHub for visibility. Issues and pull requests are not accepted here;
-> the mirror is overwritten on every push. Contact: see the profile of [@mekstromjr](https://github.com/mekstromjr).
+Turns scanned handwritten recipe cards and newspaper clippings into structured recipes in a
+self-hosted [Mealie](https://mealie.io) instance, using local OCR and a local language
+model, with a human review step before anything is published and the original scan kept
+alongside every recipe.
 
-Digitize old family recipes — handwritten cards and newspaper clippings — and upload them to
-the self-hosted **Mealie** server, preserving the original scan as a permanent record.
+![The Mealie recipe library: a grid of recipe cards with photos, titles and category tags such as Brunch, Vegetables and No Added Sugar](docs/screenshots/recipes-mealie.webp)
 
-> **Status:** working end-to-end (extract → reviewed output); Mealie upload is manual/bulk.
-> Tracking issue: [meklab/home#36](https://gitlab.meklab.net/meklab/home/-/issues/36)
-> (milestone *meklab: Recipe Pipeline*).
+**Status:** in use, running in a Kubernetes cluster as two services (a FastAPI server and
+an OCR worker). Recipes reach Mealie when a person approves them in the hosted review UI;
+nothing is uploaded automatically. Developed on a self-hosted GitLab; this GitHub repo is a
+read-only mirror.
 
-## What it does
+## How it works
 
-```
-inbox/*.pdf                         # one scanned PDF = one recipe (multi-page OK)
-  → render pages to images          (pypdfium2, no system deps)
-  → OCR                             (Apple Vision, on-device — reads any orientation)
-  → detect orientation              (90/270 by text volume; 0-vs-180 by a text-model A/B check);
-                                      reverse line order for 180; make an upright copy for review/display
-  → structure + relevance filter    (local LLM, JSON-schema: recipe fields; drop unrelated
-                                      clipping text; quaint off-recipe bits → extras.source_curiosities)
-  → enrich (additive only)          (local model + SearXNG: cuisine, meal, dish history,
-                                      estimated times/servings — never alters card content)
-  → assemble recipe JSON w/ provenance (from_card vs enriched vs estimated)
-  → REVIEW GATE                     (faint/empty/[UNCLEAR]/missing/low-confidence → HELD;
-                                      only clean recipes are eligible to upload)
-  → (manual) bulk-import to Mealie  (recipe + upright page image + the ORIGINAL PDF as an asset)
+```mermaid
+flowchart LR
+    U[Upload PDFs or ZIP<br/>web UI] --> S[(Postgres jobs<br/>+ S3 scans)]
+    S -->|claim with lease| W[worker]
+    W --> O[glm-ocr<br/>CPU Ollama]
+    O -->|failed card| C[cloud OCR<br/>OpenRouter]
+    O & C --> T[qwen3.5:4b<br/>structure + enrich]
+    T --> G[review gate]
+    G -->|result| S
+    S --> R[human review UI<br/>edit, approve, reject]
+    R -->|approve| M[Mealie<br/>recipe + image + original PDF]
 ```
 
-### Why this design (not "just ask GPT to read it")
+1. Scans are uploaded through the server's web UI (one PDF per recipe, multi-page is fine,
+   or a ZIP of them). Each file becomes a job in Postgres, and the PDF is stored in
+   S3-compatible storage. Re-uploading identical content is reported as a duplicate.
+2. The worker claims a job over an outbound HTTP API, renders the pages, and transcribes
+   them with `glm-ocr` on a CPU-only Ollama host. A card that fails locally gets one retry
+   with a cloud vision model via OpenRouter; that is the only path by which a scan is sent
+   to a third-party service.
+3. `qwen3.5:4b` structures the transcription into recipe fields (title, ingredients,
+   steps, times, servings) and drops unrelated clipping text. A separate enrichment pass
+   adds cuisine, course and a short dish history using a SearXNG search on the dish name.
+4. A quality gate checks for faint or empty scans, `[UNCLEAR]` spans, missing structure
+   and model repetition, and attaches its reasons to the recipe. Failed extractions are
+   filed as failed; everything else lands in the review queue.
+5. A person reviews each recipe next to its scan, edits if needed, and approves or
+   rejects it. Approval creates the recipe in Mealie with the upright page image and the
+   original PDF attached as an asset.
 
-Pure vision-LLM transcription is **rejected as the source of truth**: on ambiguous handwriting
-LLMs silently emit a plausible-but-wrong word (in one study GPT-4o was wrong 64% of the time on
-genuinely unclear characters) rather than flagging doubt — a silent `1 tsp → 1 tbsp` would
-survive review *because it looks right*. (We confirmed this locally: the vision model hallucinated
-a whole fake recipe from a rotated scan.)
+## Engineering decisions
 
-So **Apple Vision does the transcription** — it's accurate on this corpus (~3% CER on legible
-cursive in our bake-off), on-device/private, free, and orientation-tolerant. A local LLM only
-*structures* Apple Vision's text into recipe fields and *adds* metadata; it never overrides what
-the OCR read. (An earlier two-engine + image-grounded-reconcile design was removed: the second
-engine, TrOCR, was universally worse here and its disagreement with Apple Vision broke the quality
-gate, while feeding the LLM raw images caused rotation hallucinations.)
+- **OCR transcribes; the language model never overrides it.** A vision LLM asked to read
+  ambiguous handwriting tends to produce a plausible word rather than flag doubt, and a
+  silent `1 tsp` to `1 tbsp` would survive review because it looks right. An early local
+  test confirmed this: a vision model invented an entire recipe from a rotated scan. So
+  the text model only structures and annotates the OCR output, and the verbatim
+  transcription is kept on every recipe (`original_transcription`).
+- **Card content and added content are kept apart.** Every field carries provenance
+  (from the card, enriched, or estimated). Estimated times and servings are listed as
+  such, and dish history, OCR confidence and off-recipe curiosities go into Mealie's
+  `extras` rather than the canonical fields. Only the dish name is sent to web search,
+  never the card's quantities.
+- **Human approval is the gate, not a confidence score.** On a clean card `glm-ocr`
+  matched the previous OCR engine line for line, but it makes plausible substitutions on
+  hard cards (one read "Worchestershire
+  sauce" as "shredded cheese"), and no automated check catches those. So every
+  non-failed recipe goes to the review queue.
+- **Guarding the OCR model's failure modes.** Uncapped, `glm-ocr` generated without end
+  on a faint page; with a 2,048-token cap it terminates in about three minutes. The
+  review gate also detects a transcript that repeats itself.
+- **No rotation step.** `glm-ocr` reads 180-degree pages in correct line order, and
+  pre-rotating sideways pages made results worse, so the pipeline OCRs the raw scan and
+  only deskews the display image.
+- **A job state machine shared by both sides.** The worker and server import one
+  `shared/` package for the recipe model and the job lifecycle (`queued`, `processing`,
+  `needs_review`, `approved`, `uploaded`, plus `failed` and `rejected`), so an illegal
+  transition is a programming error rather than silent corruption. A claimed job holds a
+  lease; if the worker dies mid-job, the lease expires and the job returns to the queue.
+- **The worker holds one credential and makes only outbound calls.** It never touches the
+  database, S3 or Mealie directly; it claims jobs, downloads the source, and posts results
+  (idempotently, so retries are safe).
+- **Mealie's ingredient parser, with a confidence floor.** Parsed ingredients make
+  amounts and units structured in Mealie, but the parser rewrites wording on OCR'd
+  handwriting, so a parse below 0.90 confidence falls back to the verbatim line. Details
+  in [docs/mealie-api.md](docs/mealie-api.md).
 
-Everything that *adds* information (dish history, cuisine, estimated cook time) is kept strictly
-separate from what was actually on the card, via per-field **provenance** and Mealie's `extras`;
-the verbatim OCR text is preserved on `original_transcription`.
-
-## Quickstart
-
-```bash
-cd recipe-pipeline
-uv sync --extra apple         # Apple Vision OCR backend (macOS); core deps are light
-cp .env.example .env          # then edit
-uv run recipe-pipeline --help
-```
-
-Drop scanned PDFs (one per recipe) into `inbox/`, then:
-
-```bash
-uv run recipe-pipeline extract            # all of inbox/ -> reviewed output/<slug>/
-uv run recipe-pipeline extract --limit 20 # sample batch (process 20 new recipes)
-uv run recipe-pipeline extract --force    # reprocess everything (default: skip already-done)
-uv run recipe-pipeline review             # local UI: work the needs_review queue (scan + edit + approve)
-# ...then upload (ok recipes auto-upload; needs_review upload once approved in the review UI)
-```
-
-### Batch processing
-
-> **Retired 2026-09-18.** This repo used to ship a macOS `launchd` pair that ran
-> `extract --limit 50` + `escalate --limit 50` at 01:00 nightly, plus a daytime upload agent,
-> with `sudo pmset repeat wake` to wake the Mac for it. **That was an artifact of early
-> development.** The pipeline now runs entirely in the k3s cluster: `recipe-service` takes
-> uploads and `recipe-worker` claims jobs continuously, so there is nothing to schedule and
-> nothing to keep a laptop awake for. `scripts/nightly-batch.sh`, `scripts/upload-batch.sh`,
-> both plists and the `escalate` CLI command were deleted rather than left to rot.
->
-> The local `extract` / `review` / `upload` commands still exist for working a corpus on a
-> Mac by hand, but the hosted service is the supported path.
-
-**Cloud escalation (hard cursive).** Apple Vision can't reliably read difficult handwriting (and
-a local VLM *fabricates* on it — dangerous). So failed cards escalate to a strong cloud vision
-model, which reads cursive far better. The worker does this automatically: a FAILED local pass
-gets one shot with the cloud OCR before failure is accepted (`pull.py`). This is the only stage
-that sends a scan off-device, and only for the failed tail; results still pass the review gate. Set
-`RECIPE_OPENROUTER_API_KEY` in `.env`. On a sample, escalating the failed tail
-roughly doubled the usable rate.
-
-## Mealie API mapping (verified against the live v3.19.1 instance)
-
-Create is **two calls**: `POST /api/recipes` with `{"name": "..."}` returns a slug, then
-`PATCH /api/recipes/{slug}` with the full `Recipe-Input` body.
-
-| Our field | Mealie `Recipe-Input` | Notes |
-|---|---|---|
-| title | `name` | |
-| summary | `description` | |
-| ingredients | `recipeIngredient[]` `[{note, quantity:0}]` | free-text mode + `settings.disableAmount:true` |
-| steps | `recipeInstructions[]` `[{text}]` | `text` required |
-| servings | `recipeServings` (num) + `recipeYield` (str) | estimates flagged in `extras` |
-| times | `prepTime`/`cookTime`/`totalTime`/`performTime` (str) | estimates flagged |
-| meal/course | `recipeCategory[]` `[{name, slug}]` | name + slug both required |
-| cuisine/genre | `tags[]` `[{name, slug}]` | name + slug both required |
-| source / notes | `notes[]` `[{title, text}]` | |
-| provenance, dish history, AI-estimate flags, OCR confidence, `[UNCLEAR]` spans, off-recipe curiosities | `extras` (free-form object) | keeps non-card content OUT of canonical fields |
-| display image | `PUT /api/recipes/{slug}/image` (multipart) | page-1 rendered JPEG |
-| **original scanned PDF** | `POST /api/recipes/{slug}/assets` (multipart) | permanent record of the source |
-
-**Auth:** the `mealie` Service is plain ClusterIP:9000 with no Authentik (that middleware is
-only at the Traefik ingress), so `kubectl -n prod port-forward svc/mealie 9000:9000` + a Mealie
-API token gives clean API access. SearXNG's JSON API needs the same port-forward trick.
+History: [docs/redesign-v2-plan.md](docs/redesign-v2-plan.md) is the plan for the move
+from an on-device Apple Vision OCR pipeline on a Mac to the current in-cluster design. It
+is kept as a historical record and differs from what shipped in places.
 
 ## Layout
 
-Restructured into a **uv workspace** (recipe-pipeline #2): the worker (MacBook OCR) and the
-server (k8s control plane) share one `Recipe` model via `shared/`, so they can never drift.
-`uv sync` builds all three members into one dev venv; the server image (#12) builds only the
-server member, so it never pulls the worker's Apple Vision deps. Full design: repo wiki
-`architecture/recipe-service` (milestone *meklab: Recipe Service*).
-
 | Path | Role |
 |---|---|
-| `shared/` (`recipe-pipeline-shared`) | the Recipe model + slug — imported by worker AND server |
-| `shared/src/recipe_pipeline_shared/schema.py` | `Recipe` model + per-field provenance + review report |
-| `shared/src/recipe_pipeline_shared/slug.py` | `slugify` (job slugs + Mealie organizer slugs) |
-| `worker/` (`recipe-pipeline-worker`) | the MacBook OCR pipeline + the `recipe-pipeline` CLI |
-| `worker/src/recipe_pipeline/config.py` | settings (pydantic-settings, `RECIPE_` env prefix) |
-| `worker/src/recipe_pipeline/prompts.py` | structure/review system prompts incl. relevance rules |
-| `worker/src/recipe_pipeline/pdf.py` | render PDF pages → images (pypdfium2) |
-| `worker/src/recipe_pipeline/ingest.py` | discover `inbox/*.pdf` → jobs |
-| `worker/src/recipe_pipeline/preprocess.py` | orientation detection + upright image (for review/display) |
-| `worker/src/recipe_pipeline/htr/` | OCR backends: `applevision` (local) + `openrouter` (cloud escalation) |
-| `worker/src/recipe_pipeline/structure.py` | OCR text → recipe fields + relevance filter |
-| `worker/src/recipe_pipeline/enrich.py` | SearXNG-backed additive metadata enrichment |
-| `worker/src/recipe_pipeline/review.py` | quality gate (faint/empty/[UNCLEAR]/structure/LLM review) |
-| `worker/src/recipe_pipeline/render.py` | recipe → markdown for human review |
-| `worker/src/recipe_pipeline/bakeoff.py` | CER/WER OCR comparison harness |
-| `worker/src/recipe_pipeline/extract.py` | end-to-end batch orchestration (resumable; manifest) |
-| `worker/src/recipe_pipeline/review_server.py` | current local review UI (superseded by the hosted server in #9) |
-| `worker/src/recipe_pipeline/mealie.py` | Mealie API client (migrates server-side in #7) |
-| `worker/src/recipe_pipeline/cli.py` | `extract` / `review` / `upload` / `work` / `bakeoff` commands |
-| `server/` (`recipe-pipeline-server`) | FastAPI control plane (scaffold; built in #4–#8) — NO Apple Vision deps |
+| `shared/` | `Recipe` model with per-field provenance, review report, job state machine, Mealie payload builder |
+| `server/` | FastAPI control plane: uploads, worker API, review API and UI, Mealie injection, Alembic migrations |
+| `worker/` | OCR and structuring pipeline, the `recipe-pipeline` CLI, and the pull loop (`recipe-pipeline work`) |
+| `scripts/promptcheck.py` | Ad-hoc check of the structuring prompt against a live model |
+| `Dockerfile`, `Dockerfile.worker` | Server and worker images; each installs only its own workspace member |
+
+## Running it locally
+
+Requires Python 3.12+, [uv](https://docs.astral.sh/uv/), and an
+[Ollama](https://ollama.com) server with `glm-ocr` and `qwen3.5:4b` pulled. Enrichment
+queries a SearXNG instance; if it is unreachable, recipes come back unenriched.
+
+```bash
+git clone https://github.com/mekstromjr/recipe-pipeline.git
+cd recipe-pipeline
+uv sync                       # installs shared, worker and server into one venv
+cp .env.example .env          # set RECIPE_OLLAMA_HOST and friends
+uv run recipe-pipeline --help
+```
+
+The worker CLI can process a folder of scans without the server:
+
+```bash
+uv run recipe-pipeline extract --limit 5   # inbox/*.pdf -> output/<slug>/ (recipe JSON, pages, review)
+uv run recipe-pipeline review              # local review UI on http://127.0.0.1:8765
+uv run recipe-pipeline upload              # push ok and approved recipes to Mealie
+```
+
+The deployed path is the server plus `recipe-pipeline work`, which needs
+`RECIPE_SERVER_URL` and `RECIPE_WORKER_API_KEY`. The server runs with
+`uvicorn --factory recipe_pipeline_server.app:create_app`, applies its Alembic migrations
+on startup, and expects Postgres, S3-compatible storage and forward-auth in front of the
+human-facing routes (it reads the `X-Authentik-Username` header).
+
+## Testing and CI
+
+```bash
+uv run ruff check .
+uv run pytest -q
+```
+
+Without a database, 85 tests pass and 25 API tests skip. To run those, point
+`RECIPE_TEST_DB_URL` at a scratch Postgres (the schema is migrated on startup and tables
+are truncated per test):
+
+```bash
+docker run -d --rm --name recipe-test-db -p 127.0.0.1:5433:5432 \
+  -e POSTGRES_USER=recipes -e POSTGRES_PASSWORD=ci-only -e POSTGRES_DB=recipes_test \
+  postgres:16.6-alpine
+RECIPE_TEST_DB_URL=postgresql+psycopg://recipes:ci-only@127.0.0.1:5433/recipes_test \
+  uv run pytest -q
+```
+
+Ollama, Mealie and S3 are faked in tests. The GitLab pipeline runs secret detection, ruff,
+the worker and shared tests, and the server tests against a Postgres service container,
+then builds the server and worker images with Kaniko from the same commit on `main` and
+on semver tags.
+
+## Configuration
+
+All settings use the `RECIPE_` prefix and can also be read from `.env`. See
+[.env.example](.env.example),
+[worker/src/recipe_pipeline/config.py](worker/src/recipe_pipeline/config.py) and
+[server/src/recipe_pipeline_server/config.py](server/src/recipe_pipeline_server/config.py).
+
+| Variable | Used by | Purpose |
+|---|---|---|
+| `RECIPE_OLLAMA_HOST` | worker | Ollama server running the OCR and text models |
+| `RECIPE_OCR_MODEL` / `RECIPE_TEXT_MODEL` | worker | `glm-ocr:latest` and `qwen3.5:4b` by default |
+| `RECIPE_NUM_THREAD` | worker | Must equal the Ollama host's CPU allocation (llama.cpp ignores the cgroup limit) |
+| `RECIPE_OCR_NUM_PREDICT` | worker | OCR token cap, the guard against runaway generation (2048) |
+| `RECIPE_OPENROUTER_API_KEY` | worker | Enables cloud OCR escalation for cards that fail locally; unset disables it |
+| `RECIPE_SEARXNG_URL` | worker | SearXNG for enrichment |
+| `RECIPE_SERVER_URL` | worker | Server address for the `work` pull loop |
+| `RECIPE_WORKER_API_KEY` | both | The worker's one credential; the server checks it on the worker API |
+| `RECIPE_DB_URL` | server | Postgres DSN (`postgresql+psycopg://...`) |
+| `RECIPE_S3_ENDPOINT`, `RECIPE_S3_BUCKET`, `RECIPE_S3_ACCESS_KEY`, `RECIPE_S3_SECRET_KEY` | server | Storage for source scans and page images |
+| `RECIPE_MEALIE_URL` / `RECIPE_MEALIE_API_TOKEN` | both | Mealie target for approved recipes |
+| `RECIPE_GROUP_TAGS` | both | Tags added to every uploaded recipe |
+
+## License
+
+[MIT](LICENSE)
