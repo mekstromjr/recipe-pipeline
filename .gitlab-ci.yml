@@ -1,9 +1,10 @@
 # recipe-pipeline CI
 #
 # Stages:
-#   - test:  Secret Detection + unit tests for shared, server AND worker. The worker used to
-#            be excluded here because Apple Vision (pyobjc) cannot install on a linux runner;
-#            since glm-ocr replaced it the worker is ordinary portable Python and is tested.
+#   - test:  Secret Detection + ruff + unit tests for shared, server AND worker. The worker
+#            used to be excluded here because Apple Vision (pyobjc) cannot install on a linux
+#            runner; since glm-ocr replaced it the worker is ordinary portable Python and is
+#            tested. The server's API tests run against a Postgres service container.
 #   - build: Kaniko → registry.meklab.net/$CI_PROJECT_PATH
 #            SERVER  :<tag>         (Dockerfile)
 #            WORKER  /worker:<tag>  (Dockerfile.worker) — separate image, see that file
@@ -43,6 +44,7 @@ test:worker:
     - meklab-k3s
   script:
     - uv sync --frozen --package recipe-pipeline-worker
+    - uv run --no-sync ruff check .
     - uv run --no-sync pytest shared/tests worker/tests -q
   rules:
     - if: $CI_COMMIT_BRANCH || $CI_COMMIT_TAG
@@ -53,9 +55,20 @@ test:server:
   image: ghcr.io/astral-sh/uv:0.7.17-python3.12-bookworm-slim
   tags:
     - meklab-k3s
+  # Without RECIPE_TEST_DB_URL the review, upload and worker API suites skip. Major version
+  # matches production (Postgres 16).
+  services:
+    - name: postgres:16.6-alpine
+      alias: postgres
+  variables:
+    POSTGRES_DB: recipes_test
+    POSTGRES_USER: recipes
+    POSTGRES_PASSWORD: ci-only
+    RECIPE_TEST_DB_URL: postgresql+psycopg://recipes:ci-only@postgres:5432/recipes_test
   script:
     - uv sync --frozen --package recipe-pipeline-server
-    - uv run --no-sync pytest shared/tests server/tests -q
+    # -rs lists any skipped test, so a silently skipped DB suite shows up in the log.
+    - uv run --no-sync pytest shared/tests server/tests -q -rs
   rules:
     - if: $CI_COMMIT_BRANCH || $CI_COMMIT_TAG
       when: always

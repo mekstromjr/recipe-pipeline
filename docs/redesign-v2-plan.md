@@ -1,5 +1,10 @@
 # recipe-pipeline v2 — plan (CPU Ollama, Apple Vision removed)
 
+> **Historical document.** This is the plan written before the move from Apple Vision on a
+> Mac to glm-ocr in the cluster. It is kept as a record of the reasoning; the
+> [README](../README.md) describes the current system. One notable difference from what
+> shipped: OpenRouter cloud escalation for cards that fail locally was kept, not skipped.
+
 Status: APPROVED-PENDING (Q1-Q3 answered). Supersedes the Mac-bound v1 flow.
 
 ## Goal

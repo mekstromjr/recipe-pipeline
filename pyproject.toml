@@ -1,7 +1,7 @@
 # Virtual workspace root for the recipe service.
 #   shared/  -> recipe-pipeline-shared : the Recipe model + slug (worker + server share it)
-#   worker/  -> recipe-pipeline-worker : MacBook OCR pipeline (Apple Vision), `recipe-pipeline` CLI
-#   server/  -> recipe-pipeline-server : FastAPI control plane in k8s (NO Apple Vision deps)
+#   worker/  -> recipe-pipeline-worker : OCR pipeline (glm-ocr on Ollama), `recipe-pipeline` CLI
+#   server/  -> recipe-pipeline-server : FastAPI control plane in k8s (no OCR deps)
 [tool.uv.workspace]
 members = ["shared", "worker", "server"]
 
